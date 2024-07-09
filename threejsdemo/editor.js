@@ -5,8 +5,10 @@ import { saveAs } from 'file-saver';
 
 import { stlFileName } from './labels.js';
 
-let scene, camera, renderer, controls, raycaster, mouse, intersectedObject, arrowHelper;
+let scene, camera, renderer, controls, raycaster, mouse, intersectedObject, line;
 let savedPoints = [];
+
+const distance = 20; // Set the distance for the second point
 
 function init() {
   // Create the scene
@@ -89,8 +91,16 @@ function onMouseMove(event) {
 
 function onMouseClick(event) {
   if (intersectedObject) {
-    const intersectPoint = raycaster.intersectObject(intersectedObject)[0].point;
-    savedPoints.push(intersectPoint);
+    const intersect = raycaster.intersectObject(intersectedObject)[0];
+    const intersectPoint = intersect.point;
+    const normal = intersect.face.normal.clone().transformDirection(intersectedObject.matrixWorld);
+    const secondPoint = intersectPoint.clone().add(normal.multiplyScalar(distance));
+
+    // Save both points
+    savedPoints.push({
+      surfacePoint: intersectPoint,
+      secondPoint: secondPoint
+    });
     savePointsToFile(savedPoints);
   }
 }
@@ -99,8 +109,6 @@ function savePointsToFile(points) {
   const blob = new Blob([JSON.stringify(points)], { type: 'text/plain;charset=utf-8' });
   saveAs(blob, 'saved_points.txt');
 }
-
-let line;
 
 function animate() {
   requestAnimationFrame(animate);
@@ -124,7 +132,7 @@ function animate() {
       // Create geometry for the line
       const geometry = new THREE.BufferGeometry().setFromPoints([
         intersectPoint,
-        intersectPoint.clone().add(normal.multiplyScalar(20)) // Length changed to 20
+        intersectPoint.clone().add(normal.multiplyScalar(distance))
       ]);
 
       // Create the line material
@@ -140,7 +148,7 @@ function animate() {
 
       const points = [
         intersectPoint,
-        intersectPoint.clone().add(normal.multiplyScalar(20)) // Length changed to 20
+        intersectPoint.clone().add(normal.multiplyScalar(distance))
       ];
 
       line.geometry.setFromPoints(points);
@@ -159,4 +167,3 @@ function animate() {
 
 // Initialize the scene
 init();
-
