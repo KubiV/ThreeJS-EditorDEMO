@@ -42,6 +42,15 @@ function init() {
   directionalLight.position.set(0, 1, 1).normalize();
   scene.add(directionalLight);
 
+  // Additional lights
+  const bottomLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  bottomLight.position.set(0, -1, 0).normalize(); // From below
+  scene.add(bottomLight);
+
+  const backgroundLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  backgroundLight.position.set(0, 0, -1).normalize(); // From behind
+  scene.add(backgroundLight);
+
   // Handle window resize
   window.addEventListener('resize', onWindowResize, false);
 

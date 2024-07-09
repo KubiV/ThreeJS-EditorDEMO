@@ -1,26 +1,36 @@
 h1 {
     color: #54ffd4;
-  }
+}
 
 body {
+    margin: 0;
     font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden; /* Prevents scrolling */
+}
+
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10; /* Ensures the text is on top */
 }
 
 .container {
     display: flex;
+    justify-content: flex-end;
 }
-.left {
-    width: 80%;
-    background-color: lightblue;
-    position: relative;
-}
+
 .right {
     width: 20%;
     outline: auto;
-    float: right;
-    position: relative; /* Position relative to contain the Three.js canvas */
 }
+
 #app {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
-    position: absolute; /* Fill the entire right div */
+    height: 100%;
+    z-index: 1; /* Ensures the script is behind the text */
 }
