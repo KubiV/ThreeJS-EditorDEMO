@@ -1,0 +1,26 @@
+h1 {
+    color: #54ffd4;
+  }
+
+body {
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.container {
+    display: flex;
+}
+.left {
+    width: 80%;
+    background-color: lightblue;
+    position: relative;
+}
+.right {
+    width: 20%;
+    outline: auto;
+    float: right;
+    position: relative; /* Position relative to contain the Three.js canvas */
+}
+#app {
+    width: 100%;
+    position: absolute; /* Fill the entire right div */
+}
