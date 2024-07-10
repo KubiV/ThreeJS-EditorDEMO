@@ -1,6 +1,7 @@
-import * as THREE from 'three';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+console.log('view script loaded and executed.');
+import * as THREE from '../node_modules/three/build/three.module.js';
+import { STLLoader } from '../node_modules/three/examples/jsm/loaders/STLLoader.js';
+import { OrbitControls } from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
 import { stlFileName, labels } from './labels.js';
 
 let scene, camera, renderer, controls;
