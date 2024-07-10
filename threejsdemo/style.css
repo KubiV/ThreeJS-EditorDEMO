@@ -34,3 +34,15 @@ body {
     height: 100%;
     z-index: 1; /* Ensures the script is behind the text */
 }
+
+#resetButton {
+    position: absolute;
+    top: 30px;
+    left: 180px;
+    z-index: 100; /* Ensure the button is on top of the canvas */
+    padding: 5px 10px;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    cursor: pointer;
+  }

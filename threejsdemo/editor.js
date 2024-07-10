@@ -7,6 +7,8 @@ import GUI from 'lil-gui'; // Importing lil-gui
 
 let scene, camera, renderer, controls, raycaster, mouse, intersectedObject, line;
 let savedPoints = [];
+let initialCameraPosition, initialControlsTarget;
+let modelLoaded = false;
 
 // Define distance variable
 const params = {
@@ -20,6 +22,7 @@ function init() {
 
     // Set up the camera
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    initialCameraPosition = new THREE.Vector3(0, 0, 0); // Set your initial camera position here
 
     // Set up the renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -29,6 +32,7 @@ function init() {
     // Add OrbitControls
     controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 0, 0);
+    initialControlsTarget = new THREE.Vector3(0, 0, 0); // Set your initial controls target here
 
     // Initialize raycaster and mouse
     raycaster = new THREE.Raycaster();
@@ -65,6 +69,9 @@ function init() {
     const gui = new GUI();
     gui.add(params, 'distance', 1, 100).name('Distance');
 
+    // Add event listener for reset button
+    document.getElementById('resetButton').addEventListener('click', resetModelPosition);
+
     // Start the animation loop
     animate();
 }
@@ -87,6 +94,15 @@ function loadModel(stlFile) {
         const cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
         camera.position.set(center.x, center.y + cameraZ, center.z);
         camera.lookAt(center);
+
+        // Store initial camera position after model is loaded
+        initialCameraPosition.copy(camera.position);
+
+        // Update the controls to match the new camera position
+        controls.update();
+
+        modelLoaded = true;
+
 
         // Update the controls to match the new camera position
         controls.update();
@@ -124,6 +140,20 @@ function onMouseClick(event) {
 function savePointsToFile(points) {
     const blob = new Blob([JSON.stringify(points)], { type: 'text/plain;charset=utf-8' });
     saveAs(blob, 'saved_points.txt');
+}
+
+function resetModelPosition() {
+  if (!modelLoaded) return;
+
+  // Reset camera position
+  camera.position.copy(initialCameraPosition);
+  camera.lookAt(initialControlsTarget);
+
+  // Reset controls target
+  controls.target.copy(initialControlsTarget);
+
+  // Update controls
+  controls.update();
 }
 
 function animate() {

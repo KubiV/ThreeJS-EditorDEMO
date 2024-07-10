@@ -1,10 +1,11 @@
-// hlavní javascript
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { stlFileName, labels } from './labels.js';
 
 let scene, camera, renderer, controls;
+let initialCameraPosition, initialControlsTarget;
+let modelLoaded = false;
 
 function init() {
   // Create the scene
@@ -13,6 +14,7 @@ function init() {
 
   // Set up the camera
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  initialCameraPosition = new THREE.Vector3(0, 0, 0); // Set your initial camera position here
 
   // Set up the renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -22,6 +24,7 @@ function init() {
   // Add OrbitControls
   controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
+  initialControlsTarget = new THREE.Vector3(0, 0, 0); // Set your initial controls target here
 
   // Load the STL file
   loadModel(stlFileName);
@@ -46,6 +49,9 @@ function init() {
   // Handle window resize
   window.addEventListener('resize', onWindowResize, false);
 
+  // Add event listener for reset button
+  document.getElementById('resetButton').addEventListener('click', resetModelPosition);
+
   // Start the animation loop
   animate();
 }
@@ -69,74 +75,94 @@ function loadModel(stlFile) {
     camera.position.set(center.x, center.y + cameraZ, center.z);
     camera.lookAt(center);
 
+    // Store initial camera position after model is loaded
+    initialCameraPosition.copy(camera.position);
+
     // Update the controls to match the new camera position
     controls.update();
+
+    modelLoaded = true;
 
     // Add labels after the model is loaded
     addLabels();
   });
 }
+
 function addLabels() {
-    labels.forEach(label => {
-      // Create label sprite
-      const spriteMaterial = new THREE.SpriteMaterial({
-        map: createLabelCanvas(label.text),
-        transparent: true
-      });
-
-      const sprite = new THREE.Sprite(spriteMaterial);
-      sprite.position.set(label.secondPoint.x, label.secondPoint.y, label.secondPoint.z);
-      sprite.scale.set(10, 5, 1); // Adjust scale as needed
-      scene.add(sprite);
-
-      // Create line from surface point to label point
-      const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(label.surfacePoint.x, label.surfacePoint.y, label.surfacePoint.z),
-        new THREE.Vector3(label.secondPoint.x, label.secondPoint.y, label.secondPoint.z)
-      ]);
-
-      const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
-      const line = new THREE.Line(lineGeometry, lineMaterial);
-      scene.add(line);
-
-      // Create dot at surface point
-      const dotGeometry = new THREE.SphereGeometry(0.5, 32, 32);
-      const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-      const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-      dot.position.set(label.surfacePoint.x, label.surfacePoint.y, label.surfacePoint.z);
-      scene.add(dot);
+  labels.forEach(label => {
+    // Create label sprite
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: createLabelCanvas(label.text),
+      transparent: true
     });
-  }
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.position.set(label.secondPoint.x, label.secondPoint.y, label.secondPoint.z);
+    sprite.scale.set(10, 5, 1); // Adjust scale as needed
+    scene.add(sprite);
+
+    // Create line from surface point to label point
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(label.surfacePoint.x, label.surfacePoint.y, label.surfacePoint.z),
+      new THREE.Vector3(label.secondPoint.x, label.secondPoint.y, label.secondPoint.z)
+    ]);
+
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    scene.add(line);
+
+    // Create dot at surface point
+    const dotGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+    const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+    dot.position.set(label.surfacePoint.x, label.surfacePoint.y, label.surfacePoint.z);
+    scene.add(dot);
+  });
+}
 
 function createLabelCanvas(text) {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    const fontSize = 24;
-    const scale = 4; // Scale factor for higher resolution
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const fontSize = 24;
+  const scale = 4; // Scale factor for higher resolution
 
-    context.font = `${fontSize * scale}px Arial`;
-    const textWidth = context.measureText(text).width;
+  context.font = `${fontSize * scale}px Arial`;
+  const textWidth = context.measureText(text).width;
 
-    canvas.width = textWidth + 20 * scale;
-    canvas.height = (fontSize + 20) * scale;
+  canvas.width = textWidth + 20 * scale;
+  canvas.height = (fontSize + 20) * scale;
 
-    context.font = `${fontSize * scale}px Arial`;
-    context.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = 'black';
-    context.fillText(text, 10 * scale, (fontSize + 5) * scale);
+  context.font = `${fontSize * scale}px Arial`;
+  context.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = 'black';
+  context.fillText(text, 10 * scale, (fontSize + 5) * scale);
 
-    // Scale down the canvas to the desired size
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter; // Use linear filter for smooth scaling
-    texture.needsUpdate = true;
-    return texture;
-  }
+  // Scale down the canvas to the desired size
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter; // Use linear filter for smooth scaling
+  texture.needsUpdate = true;
+  return texture;
+}
 
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function resetModelPosition() {
+  if (!modelLoaded) return;
+
+  // Reset camera position
+  camera.position.copy(initialCameraPosition);
+  camera.lookAt(initialControlsTarget);
+
+  // Reset controls target
+  controls.target.copy(initialControlsTarget);
+
+  // Update controls
+  controls.update();
 }
 
 function animate() {
