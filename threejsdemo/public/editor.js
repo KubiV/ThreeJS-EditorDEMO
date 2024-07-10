@@ -1,9 +1,9 @@
-import * as THREE from '../node_modules/three/build/three.module.js';
-import { STLLoader } from '../node_modules/three/examples/jsm/loaders/STLLoader.js';
-import { OrbitControls } from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
+import * as THREE from './three.module.js';
+import { STLLoader } from './STLLoader.js';
+import { OrbitControls } from './OrbitControls.js';
 const { saveAs } = window;
 import { stlFileName } from './labels.js';
-import GUI from '../node_modules/lil-gui/dist/lil-gui.esm.js'; // Importing lil-gui
+import GUI from './lil-gui.esm.js'; // Importing lil-gui
 
 let scene, camera, renderer, controls, raycaster, mouse, intersectedObject, line;
 let savedPoints = [];
