@@ -23,3 +23,12 @@ export const labels = [
     // Another labels
   ];
 ```
+
+## To do
+
+* Make automatic coordinates addition to labels.js
+* Make posible label distance adjustment from visible menu
+* Make text addition posible from menu
+* Add back link from editor
+* Make more comments to the code
+* Menu for disabling labels
