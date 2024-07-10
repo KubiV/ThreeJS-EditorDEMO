@@ -12,7 +12,9 @@
     "vite": "^5.3.1"
   },
   "dependencies": {
+    "dat.gui": "^0.7.9",
     "file-saver": "^2.0.5",
+    "lil-gui": "^0.19.2",
     "three": "^0.165.0"
   }
 }
