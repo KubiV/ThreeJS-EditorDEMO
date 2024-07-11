@@ -1,3 +1,4 @@
+console.log('editor script loaded and executed.');
 import * as THREE from './three.module.js';
 import { STLLoader } from './STLLoader.js';
 import { OrbitControls } from './OrbitControls.js';
@@ -16,19 +17,19 @@ const params = {
 };
 
 function init() {
-  // Fetch labels and stlFileName from JSON
-  fetch('./labels.json')
-    .then(response => response.json())
-    .then(data => {
-      stlFileName = data.stlFileName;
+    // Fetch labels and stlFileName from JSON
+    fetch('./labels.json')
+      .then(response => response.json())
+      .then(data => {
+        stlFileName = data.stlFileName;
 
-      // Initialize the scene after data is loaded
-      initScene();
-    })
-    .catch(error => console.error('Error loading labels.json:', error));
-}
+        // Initialize the scene after data is loaded
+        initScene();
+      })
+      .catch(error => console.error('Error loading labels.json:', error));
+  }
 
-function initScene() {
+  function initScene() {
     // Create the scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xfffff0);
