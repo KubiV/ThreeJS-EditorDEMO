@@ -1,11 +1,9 @@
 # 3D Visualisations and Labels - ThreeJS DEMO
 
-Run from the "threejsdemo/public" folder using following command:
-`npm run dev`
-or in "threjsdemo" folder using:
+Run from "threjsdemo" directory using following command:
 `node server.js`
 
-In Editor window you can by clicking on the model create a .txt file, where are stored 2 sets of coordinates - one for the point on the model, second for the tag placement. Afterwards you can modify the labels inside the `labels.json` after following this scheme using the values inside the .txt:
+The labels shown in `index.html` (so called "Vizualizace" window, labels are only visible here) are stored in `labels.json` file. To add another label you can open the editor (`editor.html`) and by changing the Distance (with the slider) you modify the label distance from the model surface, Description changes the text inside the label. And finally you click at the spot on the model where you want to add the label.
 
 ```
 {
@@ -32,8 +30,8 @@ In Editor window you can by clicking on the model create a .txt file, where are 
 
 ## To do
 
-* Make automatic coordinates addition to labels.json
-* Make text addition posible from menu
-* Add back link from editor
 * Make more comments to the code
 * Menu for disabling labels
+* Import model and labels by having them listed in the URL
+* Labels editor - list view in editor and remove them
+* Add general description to right div where is now placeholder "Popisek"

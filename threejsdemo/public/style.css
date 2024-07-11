@@ -23,6 +23,9 @@ body {
 
 .right {
     width: 20%;
+    margin-top: 10%;
+    margin-right: 5%;
+    padding: 0.5%;
     outline: auto;
 }
 

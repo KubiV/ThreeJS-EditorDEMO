@@ -1,4 +1,4 @@
-console.log('editor script loaded and executed.');
+console.log('Editor script loaded and executed.');
 import * as THREE from './three.module.js';
 import { STLLoader } from './STLLoader.js';
 import { OrbitControls } from './OrbitControls.js';
@@ -13,6 +13,7 @@ let stlFileName;
 
 // Define distance variable
 const params = {
+    message: "Description",
     distance: 20
 };
 
@@ -82,6 +83,7 @@ function init() {
     // Create GUI for distance
     const gui = new GUI();
     gui.add(params, 'distance', 1, 100).name('Distance');
+    gui.add(params, 'message').name('Description');
 
     // Add event listener for reset button
     document.getElementById('resetButton').addEventListener('click', resetModelPosition);
@@ -144,7 +146,7 @@ function onMouseClick(event) {
 
         // Create the new point object
         const newPoint = {
-            text: 'Generated Point', // or any other text you want
+            text: params.message, // or any other text you want
             surfacePoint: {
                 x: intersectPoint.x,
                 y: intersectPoint.y,
