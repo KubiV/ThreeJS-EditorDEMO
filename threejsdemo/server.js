@@ -24,6 +24,29 @@ app.get('/editor.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'editor.html'));
 });
 
+// Example route for handling label updates
+app.post('/savePoints', (req, res) => {
+    const points = req.body.points; // Assuming points are sent as JSON in the request body
+
+    // Here, you would update your labels array or database with the received points
+    points.forEach(point => {
+        labels.push({
+            text: "",
+            surfacePoint: point.surfacePoint,
+            secondPoint: point.secondPoint
+        });
+    });
+
+    // Optionally, save the updated labels to a file or database
+    // Example: saving to a file (you would need appropriate permissions)
+    const fs = require('fs');
+    const labelsString = `export const labels = ${JSON.stringify(labels, null, 4)};\n`;
+    fs.writeFileSync('./labels.js', labelsString, 'utf8');
+
+    // Send a response back to the client
+    res.send('Points saved successfully');
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

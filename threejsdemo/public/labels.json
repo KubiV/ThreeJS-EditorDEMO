@@ -1,13 +1,3 @@
-# 3D Visualisations and Labels - ThreeJS DEMO
-
-Run from the "threejsdemo/public" folder using following command:
-`npm run dev`
-or in "threjsdemo" folder using:
-`node server.js`
-
-In Editor window you can by clicking on the model create a .txt file, where are stored 2 sets of coordinates - one for the point on the model, second for the tag placement. Afterwards you can modify the labels inside the `labels.json` after following this scheme using the values inside the .txt:
-
-```
 {
     "stlFileName": "Femur.stl",
     "labels": [
@@ -28,12 +18,3 @@ In Editor window you can by clicking on the model create a .txt file, where are 
       }
     ]
   }
-```
-
-## To do
-
-* Make automatic coordinates addition to labels.json
-* Make text addition posible from menu
-* Add back link from editor
-* Make more comments to the code
-* Menu for disabling labels

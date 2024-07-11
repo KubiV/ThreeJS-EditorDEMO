@@ -2,13 +2,13 @@ import * as THREE from './three.module.js';
 import { STLLoader } from './STLLoader.js';
 import { OrbitControls } from './OrbitControls.js';
 const { saveAs } = window;
-import { stlFileName } from './labels.js';
 import GUI from './lil-gui.esm.js'; // Importing lil-gui
 
 let scene, camera, renderer, controls, raycaster, mouse, intersectedObject, line;
 let savedPoints = [];
 let initialCameraPosition, initialControlsTarget;
 let modelLoaded = false;
+let stlFileName;
 
 // Define distance variable
 const params = {
@@ -16,6 +16,19 @@ const params = {
 };
 
 function init() {
+  // Fetch labels and stlFileName from JSON
+  fetch('./labels.json')
+    .then(response => response.json())
+    .then(data => {
+      stlFileName = data.stlFileName;
+
+      // Initialize the scene after data is loaded
+      initScene();
+    })
+    .catch(error => console.error('Error loading labels.json:', error));
+}
+
+function initScene() {
     // Create the scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xfffff0);

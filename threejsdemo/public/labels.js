@@ -1,6 +1,6 @@
 export const stlFileName = 'Femur.stl'; // STL model file path
 
-export const labels = [
+export const labels_x = [
     {
         text: "Fovea capitis",
         surfacePoint: { x: 10.326813061675978, y: 4.7791189670994765, z: 81.14730270379326 },
@@ -20,3 +20,5 @@ export const labels = [
     }
     // Another labels
   ];
+
+  export const labels = [];

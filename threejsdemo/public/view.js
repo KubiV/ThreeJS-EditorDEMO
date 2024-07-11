@@ -2,13 +2,28 @@ console.log('view script loaded and executed.');
 import * as THREE from './three.module.js';
 import { STLLoader } from './STLLoader.js';
 import { OrbitControls } from './OrbitControls.js';
-import { stlFileName, labels } from './labels.js';
 
 let scene, camera, renderer, controls;
 let initialCameraPosition, initialControlsTarget;
 let modelLoaded = false;
+let stlFileName;
+let labels = [];
 
 function init() {
+  // Fetch labels and stlFileName from JSON
+  fetch('./labels.json')
+    .then(response => response.json())
+    .then(data => {
+      stlFileName = data.stlFileName;
+      labels = data.labels;
+
+      // Initialize the scene after data is loaded
+      initScene();
+    })
+    .catch(error => console.error('Error loading labels.json:', error));
+}
+
+function initScene() {
   // Create the scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xfffff0);
@@ -99,7 +114,7 @@ function addLabels() {
 
     const sprite = new THREE.Sprite(spriteMaterial);
     sprite.position.set(label.secondPoint.x, label.secondPoint.y, label.secondPoint.z);
-    sprite.scale.set(10, 5, 1); // Adjust scale as needed
+    sprite.scale.set(30, 15); // Adjust scale as needed
     scene.add(sprite);
 
     // Create line from surface point to label point
