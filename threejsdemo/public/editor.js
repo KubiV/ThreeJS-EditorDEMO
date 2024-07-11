@@ -142,18 +142,53 @@ function onMouseClick(event) {
         const normal = intersect.face.normal.clone().transformDirection(intersectedObject.matrixWorld);
         const secondPoint = intersectPoint.clone().add(normal.multiplyScalar(params.distance));
 
-        // Save both points
-        savedPoints.push({
-            surfacePoint: intersectPoint,
-            secondPoint: secondPoint
-        });
-        savePointsToFile(savedPoints);
+        // Create the new point object
+        const newPoint = {
+            text: 'Generated Point', // or any other text you want
+            surfacePoint: {
+                x: intersectPoint.x,
+                y: intersectPoint.y,
+                z: intersectPoint.z
+            },
+            secondPoint: {
+                x: secondPoint.x,
+                y: secondPoint.y,
+                z: secondPoint.z
+            }
+        };
+        console.log("Client:", newPoint);
+        //savePointsToFile(newPoint);
+        savePointsToServer(newPoint);
     }
 }
 
 function savePointsToFile(points) {
     const blob = new Blob([JSON.stringify(points)], { type: 'text/plain;charset=utf-8' });
     saveAs(blob, 'saved_points.txt');
+}
+
+function savePointsToServer(point) {
+    fetch('/save-point', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(point)
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.text();
+    })
+    .then(data => {
+        console.log('Point saved:', data);
+        alert('Point saved successfully');
+    })
+    .catch(error => {
+        console.error('Error saving point:', error);
+        alert('Failed to save point');
+    });
 }
 
 function resetModelPosition() {

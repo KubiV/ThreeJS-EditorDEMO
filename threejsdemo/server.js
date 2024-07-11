@@ -30,11 +30,10 @@ app.get('/editor.html', (req, res) => {
 
 app.post('/save-point', (req, res) => {
     const newPoint = req.body;
-    console.log("server message")
-    console.log(newPoint)
+    console.log("Received new point:", newPoint);
 
     // Načtení aktuálního obsahu souboru labels.json
-    fs.readFile('labels.json', 'utf8', (err, data) => {
+    fs.readFile('./public/labels.json', 'utf8', (err, data) => {
         if (err && err.code !== 'ENOENT') {
             return res.status(500).send('Error reading file');
         }
@@ -49,7 +48,7 @@ app.post('/save-point', (req, res) => {
         labels.labels.push(newPoint);
 
         // Uložení do souboru labels.json
-        fs.writeFile('labels.json', JSON.stringify(labels, null, 2), (err) => {
+        fs.writeFile('./public/labels.json', JSON.stringify(labels, null, 2), (err) => {
             if (err) {
                 return res.status(500).send('Error writing file');
             }
