@@ -1,0 +1,13 @@
+= O 3D prohlížeči =
+
+Prohlížeč načítá data z článků v prostoru <code>3D:</code>. Samotné 3D soubory jsou odděleně v úložišti modelů.
+
+Pro změnu popisků, kategorií nebo kamery otevřete model ve vieweru tlačítkem ''Editovat''. Je nutné být přihlášen do MediaWiki účtem s právem upravovat danou stránku. Viewer používá skutečnou přihlašovací relaci MediaWiki; heslo ani cookie se do editoru neukládají.
+
+== Vložení modelu do článku ==
+
+Do běžného článku vložíte model šablonou <code><nowiki>{{3D prohlížeč|model=3D:Název modelu}}</nowiki></code>. Iframe zobrazí přímo u modelu ovladače kategorií, výběr popisku i jeho vysvětlení. Ve výchozím nastavení se před načtením zobrazí tlačítko; pro okamžité načtení použijte <code><nowiki>{{3D prohlížeč|model=3D:Název modelu|načíst po kliknutí=ne}}</nowiki></code>.
+
+Pokud článek potřebuje pouze odkaz do samostatného prohlížeče, použijte <code><nowiki>{{3D odkaz|model=3D:Název modelu}}</nowiki></code>. Odkaz se otevře v novém okně.
+
+Podrobný popis všech parametrů najdete na podstránkách [[Template:3D prohlížeč/dokumentace|Šablona:3D prohlížeč/dokumentace]] a [[Template:3D odkaz/dokumentace|Šablona:3D odkaz/dokumentace]].

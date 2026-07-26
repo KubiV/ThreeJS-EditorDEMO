@@ -1,2 +1,8 @@
+node_modules/
+dist/
+.env
+LocalSettings.js
+.DS_Store
+storage/models/
+# Lokální kopie MediaWiki; rozšíření je verzované samostatně v extensions/.
 mediawiki-1.41.1/
-poznamky.txt

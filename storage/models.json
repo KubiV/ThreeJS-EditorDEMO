@@ -1,0 +1,131 @@
+[
+  {
+    "id": "scapula",
+    "title": "Scapula",
+    "description": "Pravá lopatka",
+    "format": "STL",
+    "file": "/storage/models/scapula/scapula_20dx.stl",
+    "files": [
+      "/storage/models/scapula/scapula_20dx.stl"
+    ],
+    "rawFile": "scapula/scapula_20dx.stl",
+    "rawFiles": [
+      "scapula/scapula_20dx.stl"
+    ],
+    "variants": {
+      "original": "/storage/models/scapula/scapula_20dx.stl",
+      "medium": "/storage/models/scapula/scapula_20dx.medium.stl",
+      "small": "/storage/models/scapula/scapula_20dx.small.stl"
+    },
+    "rawVariants": {
+      "original": "scapula/scapula_20dx.stl",
+      "medium": "scapula/scapula_20dx.medium.stl",
+      "small": "scapula/scapula_20dx.small.stl"
+    },
+    "variantInfo": {
+      "original": {
+        "bytes": 13260284,
+        "triangles": 265204
+      },
+      "medium": {
+        "bytes": 5967084,
+        "triangles": 119340
+      },
+      "small": {
+        "bytes": 1591284,
+        "triangles": 31824
+      }
+    },
+    "thumbnail": "/storage/models/scapula/thumbnail.svg",
+    "rawThumbnail": "scapula/thumbnail.svg",
+    "generation": {
+      "status": "ready"
+    },
+    "license": "Vlastní licence / práva vyhrazena",
+    "author": "KubiV",
+    "origin": "sken",
+    "sourceUrl": "https://www.printables.com/model/1719842-shoulder-blade-scan-scapula-r",
+    "appearance": {
+      "color": "#c7dce9",
+      "sceneBackground": "#f7fafc",
+      "roughness": 0.6,
+      "opacity": 1,
+      "wireframe": false,
+      "clipX": 100,
+      "clipY": 100,
+      "clipZ": 100
+    },
+    "categories": [
+      {
+        "id": "obecne",
+        "name": "Obecné",
+        "description": "",
+        "color": "#2da993"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-26T18:20:03.037Z",
+    "wikiArticle": "3D:Scapula",
+    "updatedAt": "2026-07-26T18:20:03.161Z"
+  },
+  {
+    "id": "ulna",
+    "title": "Ulna",
+    "description": "",
+    "format": "STL",
+    "file": "/storage/models/ulna/Ulna.stl",
+    "files": [
+      "/storage/models/ulna/Ulna.stl"
+    ],
+    "rawFile": "ulna/Ulna.stl",
+    "rawFiles": [
+      "ulna/Ulna.stl"
+    ],
+    "variants": {
+      "original": "/storage/models/ulna/Ulna.stl",
+      "medium": "/storage/models/ulna/Ulna.medium.stl",
+      "small": "/storage/models/ulna/Ulna.small.stl"
+    },
+    "rawVariants": {
+      "original": "ulna/Ulna.stl",
+      "medium": "ulna/Ulna.medium.stl",
+      "small": "ulna/Ulna.small.stl"
+    },
+    "variantInfo": {
+      "original": {
+        "bytes": 11168984,
+        "triangles": 223378
+      },
+      "medium": {
+        "bytes": 5026084,
+        "triangles": 100520
+      },
+      "small": {
+        "bytes": 1340284,
+        "triangles": 26804
+      }
+    },
+    "thumbnail": "/storage/models/ulna/thumbnail.svg",
+    "rawThumbnail": "ulna/thumbnail.svg",
+    "generation": {
+      "status": "ready"
+    },
+    "license": "Vlastní licence / práva vyhrazena",
+    "author": "KubiV",
+    "origin": "sken",
+    "sourceUrl": "https://www.printables.com/model/681341-forearm-bone-scan-ulna-r/files",
+    "appearance": {
+      "color": "#c7dce9",
+      "roughness": 0.6,
+      "opacity": 1,
+      "wireframe": false,
+      "clipX": 100,
+      "clipY": 100,
+      "clipZ": 100
+    },
+    "tags": [],
+    "createdAt": "2026-07-26T17:43:21.083Z",
+    "wikiArticle": "3D:Ulna",
+    "updatedAt": "2026-07-26T17:43:21.235Z"
+  }
+]

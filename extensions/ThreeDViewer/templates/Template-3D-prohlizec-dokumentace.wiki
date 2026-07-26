@@ -1,0 +1,39 @@
+= Dokumentace šablony 3D prohlížeč =
+
+Šablona vloží interaktivní 3D prohlížeč přímo do článku. Model musí být uložený ve stránce jmenného prostoru <code>3D:</code>.
+
+== Použití ==
+
+<pre><nowiki>{{3D prohlížeč|model=3D:Název modelu}}</nowiki></pre>
+
+== Parametry ==
+
+{| class="wikitable"
+! Parametr !! Povinný !! Výchozí hodnota !! Popis
+|-
+| <code>model</code> || ano || — || Název článku s definicí modelu, například <code>3D:Femur</code>.
+|-
+| <code>výška</code> || ne || <code>560</code> || Výška vloženého prohlížeče v pixelech. Povolený rozsah je 260 až 1000.
+|-
+| <code>popisek</code> || ne || <code>Interaktivní 3D model</code> || Popis vloženého prohlížeče pro čtečky obrazovky.
+|-
+| <code>varianta</code> || ne || <code>malá</code> || Počáteční kvalita modelu: <code>malá</code>, <code>střední</code> nebo <code>originál</code>. Pokud vybraná varianta není k dispozici, použije se dostupný soubor.
+|-
+| <code>načíst po kliknutí</code> || ne || <code>ano</code> || Hodnota <code>ano</code> nejprve zobrazí tlačítko Načíst. Hodnota <code>ne</code> načte model ihned.
+|}
+
+== Příklady ==
+
+<pre><nowiki>{{3D prohlížeč
+ | model = 3D:Femur
+ | výška = 620
+ | varianta = střední
+ | načíst po kliknutí = ne
+}}</nowiki></pre>
+
+Vložený prohlížeč obsahuje filtrování kategorií, výběr popisků a jejich vysvětlení. Pro samostatné otevření místo vložení použijte <code><nowiki>{{3D odkaz}}</nowiki></code>.
+
+== Související stránky ==
+
+* [[3D:Prohlížeč|O 3D prohlížeči]]
+* [[Template:3D odkaz/dokumentace|Dokumentace šablony 3D odkaz]]

@@ -1,0 +1,25 @@
+{
+  "name": "mediawiki-3d-editor",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interaktivní 3D prohlížeč a editor modelů pro MediaWiki",
+  "scripts": {
+    "dev": "node server.js --dev",
+    "wiki": "php -S localhost:8000 -t mediawiki-1.41.1 mediawiki-1.41.1/maintenance/dev/includes/router.php",
+    "start": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/functions": "^4.4.2",
+    "express": "^4.19.2",
+    "meshoptimizer": "^1.2.0",
+    "multer": "^2.0.2",
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "vite": "^5.3.1"
+  }
+}

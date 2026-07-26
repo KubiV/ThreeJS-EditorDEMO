@@ -1,0 +1,1 @@
+<includeonly>{{#model3dlink:{{{model|}}}|{{{text|Otevřít interaktivní 3D prohlížeč}}}}}</includeonly><noinclude>{{Template:3D odkaz/dokumentace}}</noinclude>

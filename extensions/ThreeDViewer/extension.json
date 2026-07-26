@@ -1,0 +1,28 @@
+{
+  "name": "ThreeDViewer",
+  "version": "1.1.1",
+  "author": ["MediaWiki 3D viewer"],
+  "url": "https://www.mediawiki.org/wiki/Manual:Parser_extensions",
+  "descriptionmsg": "threedviewer-desc",
+  "type": "parserhook",
+  "MessagesDirs": {
+    "ThreeDViewer": ["i18n"]
+  },
+  "ExtensionMessagesFiles": {
+    "ThreeDViewerMagic": "ThreeDViewer.i18n.magic.php"
+  },
+  "AutoloadClasses": {
+    "MediaWiki\\Extension\\ThreeDViewer\\Hooks": "includes/Hooks.php"
+  },
+  "Hooks": {
+    "ParserFirstCallInit": "MediaWiki\\Extension\\ThreeDViewer\\Hooks::onParserFirstCallInit"
+  },
+  "config": {
+    "ThreeDViewerUrl": {
+      "value": "http://localhost:3000/",
+      "path": false,
+      "public": true
+    }
+  },
+  "manifest_version": 2
+}

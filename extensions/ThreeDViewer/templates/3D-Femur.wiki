@@ -1,0 +1,67 @@
+<model3d file="Femur.stl">
+{
+  "schemaVersion": 3,
+  "title": "Femur",
+  "description": "Ukázkový model stehenní kosti.",
+  "appearance": {
+    "color": "#c7dce9",
+    "roughness": 0.6,
+    "opacity": 1,
+    "wireframe": false,
+    "clipX": 100,
+    "clipY": 100,
+    "clipZ": 100
+  },
+  "camera": {
+    "position": [-0.73286, -76.15845, 115.6745],
+    "target": [1.963, 5.154, 88.392]
+  },
+  "tags": [
+    {
+      "id": "fovea-capitis",
+      "title": "Fovea capitis",
+      "category": "fossa",
+      "position": [10.331, 4.974, 81.005],
+      "normal": [0.99404, -0.06715, -0.0859],
+      "lineLength": 20.00023,
+      "description": "Jamka na hlavici [[Femur|stehenní kosti]], do níž se upíná vaz hlavice stehenní kosti."
+    },
+    {
+      "id": "trochanter-minor",
+      "title": "Trochanter minor",
+      "category": "processus",
+      "position": [-1.018, 16.434, 56.109],
+      "normal": [0.94523, 0.2432, 0.21772],
+      "lineLength": 37.12555,
+      "description": "Malý chocholík je úponovým místem svalu [[Musculus iliopsoas]]."
+    },
+    {
+      "id": "trochanter-major",
+      "title": "Trochanter major",
+      "category": "processus",
+      "position": [-10.729, 24.849, 77.027],
+      "normal": [0.84668, 0.53169, -0.02077],
+      "lineLength": 37.12487,
+      "description": "Velký chocholík je výrazný kostní výběžek na proximálním konci [[Femur|femuru]]."
+    },
+    {
+      "id": "condylus-femoris",
+      "title": "Condylus femoris",
+      "category": "kosti",
+      "position": [16.955, -7.593, -80.275],
+      "normal": [0.34524, 0.61775, -0.70654],
+      "lineLength": 9.90041,
+      "description": "Kondyly stehenní kosti se kloubí s tibií v [[Kolenní kloub|kolenním kloubu]]."
+    },
+    {
+      "id": "caput-femoris",
+      "title": "Caput femoris",
+      "category": "kosti",
+      "position": [1.963, 5.154, 88.392],
+      "normal": [-0.02615, -0.14268, 0.98942],
+      "lineLength": 74.25032,
+      "description": "Hlavice stehenní kosti tvoří kloubní plochu [[Kyčelní kloub|kyčelního kloubu]]."
+    }
+  ]
+}
+</model3d>

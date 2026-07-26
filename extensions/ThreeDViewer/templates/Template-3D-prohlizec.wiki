@@ -1,0 +1,1 @@
+<includeonly>{{#model3d:{{{model|}}}|{{{výška|560}}}|{{{popisek|Interaktivní 3D model}}}|{{{varianta|{{{zobrazení|malá}}}}}}|{{{načíst po kliknutí|{{{nacist po kliknuti|ano}}}}}}}}</includeonly><noinclude>{{Template:3D prohlížeč/dokumentace}}</noinclude>

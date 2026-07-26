@@ -1,0 +1,11 @@
+<model3d-categories>
+{
+  "schemaVersion": 1,
+  "categories": [
+    { "id": "kosti", "name": "Kosti", "description": "Kostní struktury." },
+    { "id": "svaly", "name": "Svaly", "description": "Svaly a jejich části." },
+    { "id": "arteria", "name": "Arterie", "description": "Tepny." },
+    { "id": "nervus", "name": "Nervy", "description": "Nervové struktury." }
+  ]
+}
+</model3d-categories>

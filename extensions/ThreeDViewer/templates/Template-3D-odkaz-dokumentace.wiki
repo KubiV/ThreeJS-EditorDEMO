@@ -1,0 +1,28 @@
+= Dokumentace šablony 3D odkaz =
+
+Šablona vytvoří odkaz do samostatného 3D prohlížeče. Odkaz se otevírá v novém okně a text i barevná ikona 3D krychle tvoří jeden klikací prvek.
+
+== Použití ==
+
+<pre><nowiki>{{3D odkaz|model=3D:Název modelu}}</nowiki></pre>
+
+== Parametry ==
+
+{| class="wikitable"
+! Parametr !! Povinný !! Výchozí hodnota !! Popis
+|-
+| <code>model</code> || ano || — || Název článku s definicí modelu, například <code>3D:Femur</code>.
+|-
+| <code>text</code> || ne || <code>Otevřít interaktivní 3D prohlížeč</code> || Text zobrazený jako odkaz.
+|}
+
+== Příklad ==
+
+<pre><nowiki>{{3D odkaz|model=3D:Femur|text=Prohlédnout femur}}</nowiki></pre>
+
+Pro vložení ovladatelného prohlížeče přímo do článku použijte <code><nowiki>{{3D prohlížeč}}</nowiki></code>.
+
+== Související stránky ==
+
+* [[3D:Prohlížeč|O 3D prohlížeči]]
+* [[Template:3D prohlížeč/dokumentace|Dokumentace šablony 3D prohlížeč]]
