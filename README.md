@@ -86,19 +86,20 @@ Zápisové endpointy (`POST /api/models`, `PUT /api/models/*` a
 originu prohlížeče, uživatel musí mít platnou relaci MediaWiki s právem `edit`
 a platí limit `security.writeRateMaxRequests` za
 `security.writeRateWindowMinutes`. Nejde tedy pouze o omezení tlačítka v UI.
-Nahrané modely nejsou veřejné statické soubory. Adresa `/storage/models/...`
-nejprve ověří relaci MediaWiki, právo `read` a případně skupinu nastavenou v
-`security.modelAccess.allowedGroups`; odpověď se navíc nesmí ukládat do sdílené
-cache. Výchozí `requireLogin: true` pustí každého přihlášeného čtenáře. Pro
-omezení například na studenty a vyučující nastavte `allowedGroups: ['student',
-'teacher']`. Přístup lze výslovně otevřít jen nastavením `requireLogin: false`.
+Chování adres `/storage/models/...` nastavuje
+`security.modelAccess.mode`: `login-required` (výchozí) vyžaduje relaci
+MediaWiki a právo `read`; `public` model zpřístupní všem včetně přímé URL;
+`view-only` dovolí anonymní načtení ve 3D prohlížeči, ale odmítne běžné otevření
+raw URL v nové kartě. Odpovědi modelů se navíc nesmí ukládat do sdílené cache.
+Pro omezení režimu `login-required` například na studenty a vyučující nastavte
+`allowedGroups: ['student', 'teacher']`.
 
 Pro ověření relace musí cookie MediaWiki přicházet i k Node aplikaci. Použijte
 stejný host pro wiki a prohlížeč, nebo bezpečně nastavte společnou cookie doménu
 pro oba důvěryhodné subdomény; jinak bude nahrání i načtení chráněného modelu
-správně odmítnuto. Uživatel, který smí model zobrazit, si jeho data může stále
-uložit z prohlížeče — ochrana brání neoprávněnému přímému přístupu, nikoli kopii
-pro oprávněného uživatele.
+správně odmítnuto. Režim `view-only` není kryptografická ochrana: Three.js musí
+data přenést do prohlížeče, takže je technicky zdatný návštěvník může z jeho
+komunikace získat. Je určen jen k zablokování běžného stažení zadáním URL.
 
 ## Uložení modelů
 

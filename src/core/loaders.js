@@ -6,6 +6,14 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
 const extensionOf = (url = '') => url.split('?')[0].split('.').pop().toLowerCase();
 
+function viewerRequestLoader(loader) {
+  // Fetch Metadata headers are not sent by every supported browser. This
+  // marker lets the server distinguish a Three.js request from ordinary URL
+  // navigation in the optional view-only access mode.
+  loader.setRequestHeader?.({ 'X-3D-Viewer-Request': '1' });
+  return loader;
+}
+
 function loadWithProgress(loader, url, onProgress) {
   return new Promise((resolve, reject) => {
     loader.load(
@@ -22,7 +30,7 @@ export async function loadModel(url, { mtlUrl, color = '#c7dce9', onProgress } =
   const extension = extensionOf(url);
 
   if (extension === 'stl') {
-    const geometry = await loadWithProgress(new STLLoader(), url, onProgress);
+    const geometry = await loadWithProgress(viewerRequestLoader(new STLLoader()), url, onProgress);
     geometry.computeVertexNormals();
     const material = new THREE.MeshStandardMaterial({
       color,
@@ -36,14 +44,14 @@ export async function loadModel(url, { mtlUrl, color = '#c7dce9', onProgress } =
   }
 
   if (extension === 'glb' || extension === 'gltf') {
-    const gltf = await loadWithProgress(new GLTFLoader(), url, onProgress);
+    const gltf = await loadWithProgress(viewerRequestLoader(new GLTFLoader()), url, onProgress);
     return gltf.scene;
   }
 
   if (extension === 'obj') {
-    const loader = new OBJLoader();
+    const loader = viewerRequestLoader(new OBJLoader());
     if (mtlUrl) {
-      const materials = await loadWithProgress(new MTLLoader(), mtlUrl, onProgress);
+      const materials = await loadWithProgress(viewerRequestLoader(new MTLLoader()), mtlUrl, onProgress);
       materials.preload();
       loader.setMaterials(materials);
     }

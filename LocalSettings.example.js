@@ -45,12 +45,16 @@ export default {
     // Vlastní origin prohlížeče je povolen automaticky. Sem přidejte pouze
     // další, výslovně důvěryhodné originy bez cesty (obvykle nechte prázdné).
     trustedOrigins: [],
-    // Modely se nevystavují jako veřejné statické soubory. Před každým
-    // načtením server ověří MediaWiki relaci a právo „read“.
+    // Režim zpřístupnění modelů:
+    // - 'login-required': pouze přihlášený čtenář MediaWiki (nejbezpečnější)
+    // - 'public': kdokoli, včetně přímé URL souboru
+    // - 'view-only': kdokoli v prohlížeči, ale běžné otevření raw URL server
+    //   odmítne; nejde o ochranu proti technicky zdatnému uživateli.
     modelAccess: {
-      requireLogin: true,
+      mode: 'login-required',
       // Prázdné pole znamená každý přihlášený čtenář. Např. ['student',
-      // 'teacher'] povolí modely jen členům těchto MediaWiki skupin.
+      // 'teacher'] povolí modely jen členům těchto MediaWiki skupin. Funguje
+      // pouze s režimem 'login-required'.
       allowedGroups: []
     }
   },

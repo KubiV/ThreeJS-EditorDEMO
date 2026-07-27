@@ -53,7 +53,7 @@ let wikiConfig = {
   pagePrefix: '',
   isConfigured: false,
   isReadable: false,
-  modelAccess: { requireLogin: true, restrictedToGroups: false },
+  modelAccess: { mode: 'login-required', requireLogin: true, restrictedToGroups: false },
   // These values keep the upload guidance useful until the server
   // configuration is loaded. A successful API response always replaces them.
   upload: { maxFileSizeBytes: 50 * 1024 * 1024, maxFiles: 5, allowedExtensions: ['.stl', '.obj', '.mtl', '.gltf', '.glb'] },

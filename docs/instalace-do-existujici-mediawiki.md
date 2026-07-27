@@ -123,7 +123,7 @@ export default {
     writeRateMaxRequests: 20,
     trustedOrigins: [],
     modelAccess: {
-      requireLogin: true,
+      mode: 'login-required',
       allowedGroups: []
     }
   },
@@ -139,7 +139,7 @@ export default {
 };
 ```
 
-Hodnota `storage.publicModelsUrl` musí být HTTPS adresa této aplikace, nikoli cesta na disku. Aplikace ukládá modely do `storage/models/` a do článků MediaWiki ukládá jen jejich relativní jména; při čtení se k nim tato adresa připojí. Cesta `/storage/models/...` už není veřejný statický adresář: před vydáním souboru Node služba ověří MediaWiki relaci, právo `read` a případně skupinu v `security.modelAccess.allowedGroups`.
+Hodnota `storage.publicModelsUrl` musí být HTTPS adresa této aplikace, nikoli cesta na disku. Aplikace ukládá modely do `storage/models/` a do článků MediaWiki ukládá jen jejich relativní jména; při čtení se k nim tato adresa připojí. Režim `security.modelAccess.mode` určuje vydání souboru: `login-required` ověří MediaWiki relaci a právo `read`, `public` povolí přímé URL všem a `view-only` dovolí anonymní načtení ve vieweru, ale odmítne běžné otevření raw URL v kartě.
 
 Zápis do aplikace ověřuje server proti MediaWiki: `POST /api/models`,
 `PUT /api/models/*` a `POST /api/wiki/publish` přijmou pouze požadavek z
@@ -225,13 +225,14 @@ Povolte z internetu pouze porty 80 a 443. Port 3000 omezte firewallem na lokáln
 
 ## 6. Zabezpečte provozní vrstvu
 
-Modely jsou standardně dostupné jen přihlášeným čtenářům MediaWiki. Pro další
-omezení nastavte `security.modelAccess.allowedGroups`, například na
-`['student', 'teacher']`; prázdné pole povolí každého přihlášeného čtenáře.
-Přímá URL bez platné relace vrací `401` a odpovědi modelů mají hlavičku
-`Cache-Control: private, no-store`. Model nelze technicky utajit před
-uživatelem, který jej smí zobrazit — jeho prohlížeč si data musí stáhnout — ale
-adresa není použitelná pro nepřihlášené ani mimo určené skupiny.
+Modely jsou standardně dostupné jen přihlášeným čtenářům MediaWiki (`mode:
+'login-required'`). Pro další omezení nastavte
+`security.modelAccess.allowedGroups`, například na `['student', 'teacher']`;
+prázdné pole povolí každého přihlášeného čtenáře. Režim `public` modely zcela
+otevře. Režim `view-only` umožní anonymní prohlížení a při běžném zadání raw URL
+vrátí `403`; nejde však o bezpečnostní hranici proti uživateli, který umí číst
+síťovou komunikaci prohlížeče. Odpovědi modelů mají hlavičku
+`Cache-Control: private, no-store`.
 
 Aplikace dále autoritativně chrání zápisové endpointy relací MediaWiki,
 kontrolou originu a limitem zápisů:

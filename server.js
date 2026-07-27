@@ -110,14 +110,28 @@ const modelAccessSettings = optionalSettingsObject(securitySettings.modelAccess,
 if (modelAccessSettings.allowedGroups !== undefined && !Array.isArray(modelAccessSettings.allowedGroups)) {
   throw new Error('LocalSettings.js: „security.modelAccess.allowedGroups“ musí být pole skupin MediaWiki.');
 }
-const configuredModelAccessRequireLogin = booleanSetting(modelAccessSettings.requireLogin, 'security.modelAccess.requireLogin', true);
+const configuredModelAccessMode = (() => {
+  const mode = settingText(modelAccessSettings.mode, 'security.modelAccess.mode');
+  if (!mode) return booleanSetting(modelAccessSettings.requireLogin, 'security.modelAccess.requireLogin', true) ? 'login-required' : 'public';
+  if (!['login-required', 'public', 'view-only'].includes(mode)) {
+    throw new Error('LocalSettings.js: „security.modelAccess.mode“ musí být „login-required“, „public“ nebo „view-only“.');
+  }
+  if (modelAccessSettings.requireLogin !== undefined) {
+    const legacyRequireLogin = booleanSetting(modelAccessSettings.requireLogin, 'security.modelAccess.requireLogin', true);
+    if (legacyRequireLogin !== (mode === 'login-required')) {
+      throw new Error('LocalSettings.js: nepoužívejte současně neslučitelné „security.modelAccess.mode“ a „requireLogin“.');
+    }
+  }
+  return mode;
+})();
+const configuredModelAccessRequireLogin = configuredModelAccessMode === 'login-required';
 const configuredModelAccessGroups = new Set((modelAccessSettings.allowedGroups || []).map((group, index) => {
   const value = settingText(group, `security.modelAccess.allowedGroups[${index}]`);
   if (!value) throw new Error('LocalSettings.js: skupina v „security.modelAccess.allowedGroups“ nesmí být prázdná.');
   return value.toLocaleLowerCase('en-US');
 }));
 if (!configuredModelAccessRequireLogin && configuredModelAccessGroups.size) {
-  throw new Error('LocalSettings.js: skupiny pro modely lze použít jen při „security.modelAccess.requireLogin: true“.');
+  throw new Error('LocalSettings.js: skupiny pro modely lze použít jen v režimu „security.modelAccess.mode: login-required“.');
 }
 
 const app = express();
@@ -335,6 +349,29 @@ async function requireModelReadAccess(req, res, next) {
   }
 }
 
+const rawModelExtensions = new Set(['.stl', '.obj', '.mtl', '.gltf', '.glb', '.bin']);
+
+function isRawModelAssetRequest(req) {
+  return rawModelExtensions.has(path.extname(String(req.path || '')).toLowerCase());
+}
+
+/**
+ * This is deliberately a convenience barrier, not authentication. The browser
+ * must still receive model bytes for Three.js to render them, so an informed
+ * viewer can copy them from developer tools. It does, however, reject normal
+ * navigation to a raw model URL while leaving FileLoader/XHR requests intact.
+ */
+function requireViewerModelRequest(req, res, next) {
+  if (configuredModelAccessMode !== 'view-only' || !isRawModelAssetRequest(req)) return next();
+  const destination = String(req.get('sec-fetch-dest') || '').toLowerCase();
+  const mode = String(req.get('sec-fetch-mode') || '').toLowerCase();
+  const viewerRequest = req.get('x-3d-viewer-request') === '1';
+  if (viewerRequest || (destination === 'empty' && mode !== 'navigate')) return next();
+  return res.status(403).json({
+    error: 'Surový 3D soubor je v režimu pouze prohlížení dostupný jen pro 3D prohlížeč.'
+  });
+}
+
 function limitWriteRate(req, res, next) {
   const now = Date.now();
   const key = req.mediaWikiUser?.name.toLocaleLowerCase();
@@ -355,7 +392,7 @@ function limitWriteRate(req, res, next) {
 
 const protectWrite = [requireTrustedWriteOrigin, requireMediaWikiEditor, limitWriteRate];
 
-app.get('/storage/models/*', requireModelReadAccess, (req, res, next) => {
+app.get('/storage/models/*', requireViewerModelRequest, requireModelReadAccess, (req, res, next) => {
   const filePath = localModelAssetPath(req.params[0]);
   if (!filePath) return res.sendStatus(404);
   return sendProtectedModelFile(filePath, res, next);
@@ -365,7 +402,7 @@ app.use('/storage', (_req, res) => res.sendStatus(404));
 
 // This is only the original demonstration model, retained for the legacy
 // demo. It uses the same access gate as uploaded models.
-app.get('/demo-assets/Femur.stl', requireModelReadAccess, (_req, res, next) => (
+app.get('/demo-assets/Femur.stl', requireViewerModelRequest, requireModelReadAccess, (_req, res, next) => (
   sendProtectedModelFile(path.join(legacyDemoRoot, 'Femur.stl'), res, next, { root: realLegacyDemoRoot })
 ));
 app.use('/demo-assets', (req, res, next) => {
@@ -458,6 +495,7 @@ app.get('/api/wiki/config', (_req, res) => {
     isConfigured: Boolean(configuredWikiApiUrl && configuredBotUsername && configuredBotPassword),
     isBotConfigured: Boolean(configuredBotUsername && configuredBotPassword),
     modelAccess: {
+      mode: configuredModelAccessMode,
       requireLogin: configuredModelAccessRequireLogin,
       restrictedToGroups: Boolean(configuredModelAccessGroups.size)
     },
