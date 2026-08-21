@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .env
 LocalSettings.js
 .DS_Store

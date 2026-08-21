@@ -22,6 +22,22 @@ PHP s podporou SQLite a samostatně nainstalovaná MediaWiki 1.41 ve složce
 `mediawiki-1.41.1/`. Tato složka v repozitáři není; tím se na GitHub
 nepublikuje ani databáze, ani její konfigurace.
 
+> **Pozor na PHP 8.4 a 8.5:** MediaWiki 1.41.1 a její přibalené knihovny
+> mohou na těchto verzích vypisovat velké množství hlášení `Deprecated`.
+> Výpis před HTTP hlavičkami následně způsobí také chybu
+> `Session name cannot be changed after headers have already been sent`.
+> Pro lokální testování použijte PHP 8.2. Na macOS s Homebrew jej lze
+> nainstalovat a vybrat jen pro aktuální terminál takto:
+>
+> ```bash
+> brew install php@8.2
+> export PATH="$(brew --prefix php@8.2)/bin:$PATH"
+> php --version
+> ```
+>
+> Poté v témže terminálu spusťte `npm run wiki`. Není nutné měnit globální
+> verzi PHP. Stejnou verzi použijte také pro údržbové PHP skripty níže.
+
 Po vytvoření lokální instalace MediaWiki vytvořte odkaz na verzované rozšíření:
 
 ```bash
@@ -43,7 +59,7 @@ npm run build
 npm start
 ```
 
-`npm run dev` spouští Vite přes Express, takže funguje jak hot reload klienta, tak lokální API pro modely. `npm start` obsluhuje složku `dist` stejným API.
+`npm run dev` spouští Vite přes Express, takže funguje jak hot reload klienta, tak lokální API pro modely. `npm start` obsluhuje složku `dist` stejným API. Složka `dist` je součástí repozitáře, aby byl k dispozici kompletní nasaditelný balíček včetně CSS i bez lokálního buildu. Po změně klientského kódu ji aktualizujte příkazem `npm run build` a změny ve `dist` zahrňte do commitu.
 
 Pro nasazení do jiné, již běžící MediaWiki včetně HTTPS, rozšíření, šablon a provozu Node.js služby použijte samostatný [produkční návod](docs/instalace-do-existujici-mediawiki.md).
 
