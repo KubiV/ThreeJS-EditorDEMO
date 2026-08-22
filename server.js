@@ -754,6 +754,7 @@ async function wikiModelRecord(article, suppliedWikitext) {
     appearance: parsed.config.appearance,
     categories: parsed.config.categories,
     tags: parsed.config.tags,
+    ...(parsed.config.orientation ? { orientation: parsed.config.orientation } : {}),
     ...(parsed.config.camera ? { camera: parsed.config.camera } : {}),
     wikitext
   };

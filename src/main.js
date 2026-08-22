@@ -8,7 +8,7 @@ import { applyMaterialSettings, findMaterialFile, loadModel } from './core/loade
 import { SceneManager } from './core/scene-manager.js';
 import { renderDashboard } from './ui/dashboard.js';
 import { renderAboutPage } from './ui/about.js';
-import { brandMarkup, setBranding, wikiSessionIndicatorMarkup } from './ui/brand.js';
+import { brandMarkup, setBranding, settingsIconMarkup, wikiSessionIndicatorMarkup } from './ui/brand.js';
 import { showCategoryDialog, showTagDialog } from './ui/dialogs.js';
 import { categoryDefinitions, renderSidebar } from './ui/sidebar.js';
 import { renderTagDraftPanel } from './ui/tag-draft-panel.js';
@@ -21,6 +21,8 @@ const defaultSettings = () => ({
   loadStrategy: 'fixed',
   onDemandLod: 'medium',
   interfaceMode: 'simple',
+  navigationMode: 'orbit',
+  showNavigationCube: true,
   embeddedLod: 'small',
   embeddedPanelMode: 'list',
   awaitingEmbeddedLoad: false,
@@ -33,6 +35,8 @@ const defaultSettings = () => ({
   canEdit: true,
   wikiDirty: false,
   defaultViewDirty: false,
+  defaultOrientationDirty: false,
+  rotationGizmoVisible: false,
   embedded: false
 });
 
@@ -64,6 +68,7 @@ let wikiSessionUser = null;
 let loadRequestId = 0;
 let modelRevision = 0;
 let defaultViewRevision = 0;
+let defaultOrientationRevision = 0;
 let wikiSaveInFlight = false;
 const deviceSettingsKey = 'wikiskripta-3d-load-settings';
 const tagDraftStoragePrefix = 'wikiskripta-3d:tag-draft:';
@@ -87,7 +92,9 @@ function readDeviceSettings() {
       loadStrategy: ['fixed', 'progressive', 'on-demand'].includes(saved.loadStrategy) ? saved.loadStrategy : 'fixed',
       lod: ['small', 'low', 'medium', 'original'].includes(saved.lod) ? saved.lod : 'original',
       onDemandLod: ['small', 'low', 'medium'].includes(saved.onDemandLod) ? saved.onDemandLod : 'medium',
-      interfaceMode: saved.interfaceMode === 'advanced' ? 'advanced' : 'simple'
+      interfaceMode: saved.interfaceMode === 'advanced' ? 'advanced' : 'simple',
+      navigationMode: ['orbit', 'turntable', 'trackball'].includes(saved.navigationMode) ? saved.navigationMode : 'orbit',
+      showNavigationCube: typeof saved.showNavigationCube === 'boolean' ? saved.showNavigationCube : true
     };
   } catch {
     return {};
@@ -100,7 +107,9 @@ function saveDeviceSettings() {
       loadStrategy: settings.loadStrategy,
       lod: settings.lod,
       onDemandLod: settings.onDemandLod,
-      interfaceMode: settings.interfaceMode
+      interfaceMode: settings.interfaceMode,
+      navigationMode: settings.navigationMode,
+      showNavigationCube: settings.showNavigationCube
     }));
   } catch {
     // A privacy-restricted browser may deny local storage; loading still works for this session.
@@ -446,17 +455,22 @@ function viewerMarkup() {
       <button type="button" class="mode-tab ${settings.canEdit ? 'is-active' : ''}" ${settings.canEdit ? '' : 'data-action="mode-toggle" data-mode="edit"'}>Úpravy</button>
       ${settings.canEdit ? '<button type="button" class="topbar-save" data-action="wiki-save" title="Uložit konfiguraci do definujícího článku 3D">Uložit do článku 3D</button>' : ''}
     </nav>` : '';
-  const topbarActions = embedded ? '' : `<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">⚙</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav>`;
+  const topbarActions = embedded ? '' : `<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav>`;
   const toolbarActions = embedded
     ? `<a class="toolbar-button toolbar-link" href="${standaloneViewerUrl()}" target="_blank" rel="noopener noreferrer" title="Otevřít plnohodnotný prohlížeč"><span class="toolbar-logo" aria-hidden="true"></span>Otevřít</a>`
     : '';
   const viewportToolbar = toolbarActions ? `<div class="viewport-toolbar">${toolbarActions}</div>` : '';
+  const navigationCube = `<div class="navigation-cube" role="group" aria-label="Navigační kostka: rychlé nastavení směru pohledu">
+    <div class="navigation-cube-main"><button type="button" class="navigation-cube-face navigation-cube-top" data-nav-face="top" aria-label="Horní pohled" title="Horní pohled">H</button><button type="button" class="navigation-cube-face navigation-cube-front" data-nav-face="front" aria-label="Přední pohled" title="Přední pohled">P</button><button type="button" class="navigation-cube-face navigation-cube-right" data-nav-face="right" aria-label="Pravý pohled" title="Pravý pohled">Pr</button></div>
+    <div class="navigation-cube-opposites"><button type="button" data-nav-face="bottom" aria-label="Dolní pohled" title="Dolní pohled">D</button><button type="button" data-nav-face="left" aria-label="Levý pohled" title="Levý pohled">L</button><button type="button" data-nav-face="back" aria-label="Zadní pohled" title="Zadní pohled">Z</button></div>
+  </div>`;
   const footerContent = `${embedded ? '<button class="footer-link" data-action="about">O 3D prohlížeči</button>' : ''}${wikiSessionUser ? '' : '<span>Pro úpravy se přihlaste do MediaWiki.</span>'}${returnTo ? `<a class="footer-link" href="${escapeHtml(returnTo)}">Zpět na článek</a>` : ''}`;
   app.innerHTML = `
     <main class="viewer ${embedded ? 'is-embedded' : ''} ${settings.awaitingEmbeddedLoad ? 'is-awaiting-load' : ''}">
       <header class="wiki-topbar">${brandMarkup({ interactive: true })}${modeControl}${topbarActions}</header>
       <div class="viewer-body"><section class="viewport">
           ${viewportToolbar}
+          ${settings.showNavigationCube ? navigationCube : ''}
           <div id="canvas"></div><div id="annotation-layer" aria-label="Štítky modelu"></div><div id="tag-draft-host"></div>
           <div class="edit-hint" hidden>Nový štítek: nastavte údaje v panelu, najeďte na povrch a kliknutím vyberte ukotvení.</div>
           ${embedGate}
@@ -479,6 +493,7 @@ async function openModel(model, tagId, lod = 'original') {
   tagDraft = undefined;
   modelRevision = 0;
   defaultViewRevision = 0;
+  defaultOrientationRevision = 0;
   settings = { ...defaultSettings(), ...readDeviceSettings() };
   loadModelAppearance(currentModel);
   if (lod !== 'original') {
@@ -508,6 +523,7 @@ async function openModel(model, tagId, lod = 'original') {
   const canvas = document.querySelector('#canvas');
   const labelLayer = document.querySelector('#annotation-layer');
   sceneManager = new SceneManager(canvas, (camera) => annotationManager?.update(camera));
+  sceneManager.setNavigationMode(settings.navigationMode);
   applySceneBackground();
   annotationManager = new AnnotationManager(sceneManager, labelLayer, {
     onSelect: (tag) => {
@@ -525,6 +541,9 @@ async function openModel(model, tagId, lod = 'original') {
   renderTagDraft();
   if (tagDraft) document.querySelector('.edit-hint').hidden = false;
   attachViewportInteractions();
+  document.querySelectorAll('[data-nav-face]').forEach((button) => button.addEventListener('click', () => {
+    sceneManager.snapToFace(button.dataset.navFace);
+  }));
   document.querySelector('[data-action="wiki-save"]')?.addEventListener('click', saveWikiModel);
   document.querySelectorAll('[data-action="mode-toggle"]').forEach((button) => button.addEventListener('click', () => {
     if (button.dataset.mode === 'read') exitWikiEdit();
@@ -596,13 +615,15 @@ async function loadCurrentModel(model, tagId, lod = 'original', { requestId = ++
     if (requestId !== loadRequestId || !sceneManager) return false;
     const camera = preserveCamera ? sceneManager.cameraState() : undefined;
     sceneManager.setModel(object);
+    sceneManager.setContentQuaternionArray(model.orientation?.quaternion);
     if (camera) sceneManager.updateCameraState(camera);
     settings.loadedObjects = sceneManager.loadedObjectNames();
     settings.lod = selectedLod;
     applyMaterialSettings(sceneManager.modelRoot, settings);
     sceneManager.setClipping(settings);
     annotationManager.setTags(model.tags || [], { preserveCategories: false, categories: currentCategoryDefinitions() });
-    if (model.camera) sceneManager.updateCameraState(model.camera);
+    if (model.camera) sceneManager.updateCameraState(model.camera, { applyModelQuaternion: !model.orientation?.quaternion });
+    sceneManager.setRotationGizmoVisible(settings.rotationGizmoVisible);
     syncTagDraftToModel();
     setLoadingStatus(`Načtena ${lodLabel(selectedLod)}`);
     renderCurrentSidebar();
@@ -642,9 +663,16 @@ function userSettingsContent() {
       ${settings.loadStrategy === 'on-demand' ? `<label>Výchozí varianta<select data-user-setting="onDemandLod">${userVariantOption('small', 'Malá (S)', settings.onDemandLod)}${userVariantOption('medium', 'Střední (M)', settings.onDemandLod)}</select></label>${currentModel ? '<button type="button" class="small-button" data-user-action="prefer-original">Po návratu načíst originál</button>' : ''}` : ''}
       ${availabilityNote}
     </section>`;
+  const navigationSettings = `
+    <section class="navigation-settings"><h2>Ovládání 3D prostoru</h2>
+      <label>Způsob otáčení<select data-user-setting="navigationMode"><option value="orbit" ${settings.navigationMode === 'orbit' ? 'selected' : ''}>Původní — pohled kolem modelu</option><option value="turntable" ${settings.navigationMode === 'turntable' ? 'selected' : ''}>Těleso — stabilní otočení</option><option value="trackball" ${settings.navigationMode === 'trackball' ? 'selected' : ''}>Těleso — volný trackball</option></select></label>
+      <label class="navigation-cube-toggle"><input type="checkbox" data-user-setting="showNavigationCube" ${settings.showNavigationCube ? 'checked' : ''}> Zobrazit navigační kostku</label>
+      <p class="setting-note">Původní režim otáčí kamerou. Stabilní otočení používá pevné osy X/Y; volný trackball dovolí i náklon kolem směru pohledu. Navigační kostka vpravo nahoře rychle nastaví šest základních směrů.</p>
+    </section>`;
   return `
     <label>Rozhraní<select data-user-setting="interfaceMode"><option value="simple" ${settings.interfaceMode === 'simple' ? 'selected' : ''}>Jednoduché</option><option value="advanced" ${settings.interfaceMode === 'advanced' ? 'selected' : ''}>Pokročilé</option></select></label>
     <p class="setting-note">Jednoduché rozhraní je určené k prohlížení a studiu. Pokročilé zobrazí technické informace o modelu.</p>
+    ${navigationSettings}
     ${loadingSettings}`;
 }
 
@@ -671,7 +699,7 @@ function renderUserSettingsPage() {
   document.title = `Nastavení prohlížeče | ${applicationName()}`;
   app.innerHTML = `
     <main class="user-settings-page">
-      <header class="wiki-topbar">${brandMarkup({ interactive: true })}<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><span class="topbar-gear" aria-hidden="true">⚙</span>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav></header>
+      <header class="wiki-topbar">${brandMarkup({ interactive: true })}<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><span class="topbar-gear" aria-hidden="true">${settingsIconMarkup()}</span>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav></header>
       <div class="wiki-page-layout"><article class="user-settings-content">
         <header class="settings-page-heading"><p class="eyebrow">UŽIVATELSKÉ NASTAVENÍ</p><h1>Prohlížeč</h1><p>Nastavení platí pro toto zařízení a uloží se i pro další modely.</p></header>
         <section class="settings-page-form" aria-label="Uživatelské nastavení prohlížeče">${userSettingsContent()}</section>
@@ -688,7 +716,8 @@ function renderUserSettingsPage() {
 }
 
 function updateUserSetting(key, value) {
-  if (key === 'loadStrategy' || key === 'interfaceMode') settings[key] = value;
+  if (key === 'loadStrategy' || key === 'interfaceMode' || key === 'navigationMode') settings[key] = value;
+  else if (key === 'showNavigationCube') settings[key] = Boolean(value);
   else if (key === 'lod' || key === 'onDemandLod') settings[key] = normalizedLod(value);
   else if (key === 'wireframe') settings[key] = Boolean(value);
   else settings[key] = Number.isNaN(Number(value)) ? value : Number(value);
@@ -701,6 +730,16 @@ function updateUserSetting(key, value) {
   if (key === 'interfaceMode') {
     if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
     else renderCurrentSidebar();
+    return;
+  }
+  if (key === 'navigationMode') {
+    sceneManager?.setNavigationMode(settings.navigationMode);
+    if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
+    return;
+  }
+  if (key === 'showNavigationCube') {
+    if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
+    else openModel(currentModel, selectedTag?.id);
     return;
   }
   applyMaterialSettings(sceneManager?.modelRoot, settings);
@@ -732,7 +771,7 @@ function fitModelView() {
     showToast('Pohled lze upravit až po dokončení načítání modelu.', 'error');
     return;
   }
-  sceneManager?.resetView();
+  sceneManager?.frameObject(sceneManager.modelRoot);
   showToast('Pohled je přizpůsoben celému modelu. Chcete-li jej nastavit jako výchozí, nejprve jej případně upravte myší.');
 }
 
@@ -765,11 +804,60 @@ function clearDefaultView() {
   showToast('Automatický pohled je připraven. Zapište změnu tlačítkem „Uložit do článku 3D“ nahoře.');
 }
 
+function toggleRotationGizmo() {
+  if (!settings.canEdit) return requestWikiEdit();
+  if (!modelIsReady()) {
+    showToast('Natočení lze upravit až po dokončení načítání modelu.', 'error');
+    return;
+  }
+  settings.rotationGizmoVisible = !settings.rotationGizmoVisible;
+  sceneManager?.setRotationGizmoVisible(settings.rotationGizmoVisible);
+  renderCurrentSidebar();
+}
+
+function stageDefaultOrientation() {
+  if (!modelIsReady() || !currentModel) return false;
+  currentModel.orientation = { quaternion: sceneManager.contentQuaternion() };
+  // Older definitions stored body orientation inside the camera. From now on
+  // camera and body state are independent, so remove the legacy duplicate.
+  if (currentModel.camera) delete currentModel.camera.modelQuaternion;
+  settings.defaultOrientationDirty = true;
+  persistModel({ defaultOrientation: true });
+  return true;
+}
+
+function saveDefaultOrientation() {
+  if (!settings.canEdit) return requestWikiEdit();
+  if (!stageDefaultOrientation()) {
+    showToast('Výchozí natočení lze nastavit až po dokončení načítání modelu.', 'error');
+    return;
+  }
+  settings.rotationGizmoVisible = false;
+  sceneManager.setRotationGizmoVisible(false);
+  renderCurrentSidebar();
+  showToast('Výchozí natočení tělesa je nastaveno. Pro trvalé uložení klikněte nahoře na „Uložit změny do článku 3D“.');
+}
+
+function clearDefaultOrientation() {
+  if (!settings.canEdit) return requestWikiEdit();
+  if (!currentModel) return;
+  delete currentModel.orientation;
+  if (currentModel.camera) delete currentModel.camera.modelQuaternion;
+  sceneManager?.resetContentRotation();
+  settings.rotationGizmoVisible = false;
+  sceneManager?.setRotationGizmoVisible(false);
+  settings.defaultOrientationDirty = true;
+  persistModel({ defaultOrientation: true });
+  renderCurrentSidebar();
+  showToast('Výchozí natočení tělesa bylo vráceno do původní orientace.');
+}
+
 function renderCurrentSidebar() {
   const host = document.querySelector('#sidebar-host');
   if (!host || !currentModel) return;
   renderSidebar(host, currentModel, selectedTag, {
     ...settings,
+    tagDraftActive: Boolean(tagDraft),
     modelReady: modelIsReady(),
     wikiDefinitionUrl: wikiDefinitionUrl(),
     wikiArticleUrl
@@ -816,12 +904,16 @@ function handleSidebarAction(action) {
     renderCurrentSidebar();
   }
   if (action === 'reset') {
-    if (currentModel?.camera) sceneManager.updateCameraState(currentModel.camera);
+    if (currentModel?.camera) sceneManager.updateCameraState(currentModel.camera, { applyModelQuaternion: !currentModel.orientation?.quaternion });
     else sceneManager.resetView();
+    sceneManager.setContentQuaternionArray(currentModel?.orientation?.quaternion);
   }
   if (action === 'fit-model') fitModelView();
   if (action === 'save-default-view') saveDefaultView();
   if (action === 'clear-default-view') clearDefaultView();
+  if (action === 'toggle-rotation-gizmo') toggleRotationGizmo();
+  if (action === 'save-default-orientation') saveDefaultOrientation();
+  if (action === 'clear-default-orientation') clearDefaultOrientation();
   if (action === 'show-all') {
     annotationManager.showAll(true);
     settings.categories = new Set((currentModel.tags || []).map((tag) => tag.category));
@@ -833,6 +925,7 @@ function handleSidebarAction(action) {
     settings.categories.clear();
     renderCurrentSidebar();
   }
+  if (action === 'add-tag') openTagDraft();
   if (action === 'edit-tag' && selectedTag) editTag(selectedTag);
   if (action === 'delete-tag' && selectedTag) deleteTag(selectedTag);
   if (action === 'request-edit') requestWikiEdit();
@@ -849,22 +942,43 @@ function handleSidebarAction(action) {
 function attachViewportInteractions() {
   const canvas = sceneManager.renderer.domElement;
   canvas.addEventListener('pointerdown', (event) => {
-    if (!settings.canEdit) return;
-    if (event.button !== 0 || !annotationManager.beginHandleDrag(event)) return;
-    canvas.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
+    if (event.button !== 0) return;
+    if (settings.canEdit && annotationManager.beginHandleDrag(event)) {
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+    if (sceneManager.beginContentRotation(event)) {
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    }
   });
   canvas.addEventListener('pointermove', (event) => {
     if (annotationManager.dragHandle(event)) return;
+    if (sceneManager.dragContentRotation(event)) return;
     if (!tagDraft) return;
     if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
     else annotationManager.showPreview(sceneManager.intersectModel(event), tagDraft.lineLength);
   });
   canvas.addEventListener('pointerup', (event) => {
-    if (!annotationManager.endHandleDrag()) return;
-    canvas.releasePointerCapture?.(event.pointerId);
-    ignoreNextClick = true;
-    showToast('Délka a směr vodicí čáry byly upraveny.');
+    if (sceneManager.consumeRotationGizmoChange()) {
+      // Dragging the rings is itself an edit. Stage it immediately so the
+      // global save button writes exactly the orientation the editor sees.
+      if (settings.canEdit && stageDefaultOrientation()) renderCurrentSidebar();
+      canvas.releasePointerCapture?.(event.pointerId);
+      ignoreNextClick = true;
+      return;
+    }
+    if (annotationManager.endHandleDrag()) {
+      canvas.releasePointerCapture?.(event.pointerId);
+      ignoreNextClick = true;
+      showToast('Délka a směr vodicí čáry byly upraveny.');
+      return;
+    }
+    if (sceneManager.endContentRotation(event)) {
+      canvas.releasePointerCapture?.(event.pointerId);
+      ignoreNextClick = true;
+    }
   });
   canvas.addEventListener('pointerleave', () => {
     if (!annotationManager.drag && !tagDraft?.position) annotationManager.hidePreview();
@@ -878,8 +992,8 @@ function attachViewportInteractions() {
     const hit = sceneManager.intersectModel(event);
     if (!hit?.face) return;
     const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-    tagDraft.position = hit.point.toArray();
-    tagDraft.normal = normal.toArray();
+    tagDraft.position = sceneManager.worldPointToContent(hit.point).toArray();
+    tagDraft.normal = sceneManager.worldDirectionToContent(normal).toArray();
     annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
     saveTagDraft();
     renderTagDraft();
@@ -1039,8 +1153,7 @@ function renderTagDraft() {
   const host = document.querySelector('#tag-draft-host');
   if (!host) return;
   if (!tagDraft) {
-    host.innerHTML = settings.canEdit ? '<button type="button" class="tag-draft-launcher" data-open-tag-draft>＋ Přidat štítek</button>' : '';
-    host.querySelector('[data-open-tag-draft]')?.addEventListener('click', openTagDraft);
+    host.innerHTML = '';
     return;
   }
   renderTagDraftPanel(host, tagDraft, {
@@ -1127,10 +1240,11 @@ function updateWikiSaveControl() {
   button.setAttribute('aria-busy', String(wikiSaveInFlight));
 }
 
-function persistModel({ defaultView = false } = {}) {
+function persistModel({ defaultView = false, defaultOrientation = false } = {}) {
   if (!isWikiModel()) return;
   modelRevision += 1;
   if (defaultView) defaultViewRevision = modelRevision;
+  if (defaultOrientation) defaultOrientationRevision = modelRevision;
   settings.wikiDirty = true;
   updateWikiSaveControl();
 }
@@ -1194,6 +1308,7 @@ async function saveWikiModel() {
   if (wikiSaveInFlight) return;
   const savedRevision = modelRevision;
   const savedDefaultViewRevision = defaultViewRevision;
+  const savedDefaultOrientationRevision = defaultOrientationRevision;
   const parserTag = createModel3dTag(currentModel);
   const text = replaceModel3dTag(currentModel.wikitext, parserTag);
   wikiSaveInFlight = true;
@@ -1207,6 +1322,7 @@ async function saveWikiModel() {
     // request only contained the previous camera state.
     if (modelRevision === savedRevision) settings.wikiDirty = false;
     if (defaultViewRevision === savedDefaultViewRevision) settings.defaultViewDirty = false;
+    if (defaultOrientationRevision === savedDefaultOrientationRevision) settings.defaultOrientationDirty = false;
     updateWikiSaveControl();
     setLoadingStatus(settings.wikiDirty ? 'Změny jsou uloženy; další změny čekají na uložení' : 'Změny jsou uloženy');
     renderCurrentSidebar();

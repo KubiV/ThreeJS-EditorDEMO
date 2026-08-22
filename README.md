@@ -7,9 +7,11 @@
 - Rozcestník modelů s náhledy, formáty a počtem štítků.
 - Načtení **STL**, **OBJ + MTL**, **GLTF** a **GLB**; v režimu úprav lze nastavit barvu, pozadí, drsnost, drátěný model, průhlednost i průřezy modelu.
 - Upload průvodce se zdrojem, autorem a licencí modelu; údaje se ukládají do registru i exportu pro MediaWiki.
-- Automatické varianty Small/Medium/Original a vygenerovaný SVG náhled. Zjednodušení zachovává souřadnice i měřítko, takže štítky fungují ve všech variantách. Pokud vytvoření variant selže, prohlížeč bezpečně použije originál.
+- Automatické varianty Small/Medium/Original a vygenerovaný SVG náhled vykreslený z plné geometrie originálu. Zjednodušení zachovává souřadnice i měřítko, takže štítky fungují ve všech variantách. Pokud vytvoření variant selže, prohlížeč bezpečně použije originál.
 - Tři strategie načítání uložené pro konkrétní zařízení: vybraná varianta, postupné S → M → originál nebo předdefinovaná varianta s tlačítkem pro originál. Vložený prohlížeč začíná malou variantou, pokud šablona neurčí jinou.
 - Anatomické **štítky** v prostoru s antialiasovanou vodicí čárou a samostatné bohaté **popisky** v panelu.
+- Levým tahem se otáčí samotné těleso virtuálním trackballem — bez pólových limitů a s volným náklonem kolem osy pohledu. Pravým tahem se posouvá pohled a kolečkem se přibližuje.
+- V uživatelském nastavení lze přepnout mezi původním orbitováním kamery, stabilním otáčením tělesa podle os a volným trackballem. Navigační kostka vpravo nahoře přepíná šest základních pohledů.
 - Filtrování kategorií, plynulé zaměření kamery na štítek a URL odkazy typu `#model=ukazka-femur&tag=caput-femoris` (funguje i název souboru modelu).
 - Editor štítků: zvolte „Přidat štítek“ a klikněte na povrch modelu. Vybraný zlatý koncový bod vodicí čáry lze táhnout myší; tím se průběžně uloží její směr do `normal` i vzdálenost do `lineLength`. Pro jemné doladění lze v režimu úprav podržet `Shift` nebo `L` a otáčet kolečkem.
 - Jednoduchý bezpečný renderer Wikitextu pro interní odkazy jako `[[Aorta|Srdečnice]]`.
@@ -150,7 +152,7 @@ Souřadnice, normály, délky čar, kamera, vzhled modelu i české popisky jsou
 Průvodce nahráním zapíše tento blok do definujícího článku automaticky. Po nahrání se článek `3D:` otevře rovnou v režimu úprav; další návštěvníci jej otevírají v režimu čtení.
 
 V rozhraní **Pokročilé** je sekce **Výchozí pohled**. Editor v ní může pohled
-nejprve automaticky přizpůsobit rozměrům modelu, pak si model myší nastavit a
+nejprve automaticky přizpůsobit rozměrům modelu, pak si model myší natočit a
 uložit aktuální pozici kamery jako výchozí. Volba **Použít automatický** zruší
 starší uloženou kameru — vhodné například pro modely nahrané před zavedením
 automatického přizpůsobení. Změnu je nutné potvrdit tlačítkem **Uložit změny**.
@@ -207,12 +209,12 @@ Autoritativní konfigurace je vložena do `<model3d>` přímo v článku MediaWi
 
 ## Články `3D:` jako zdroj dat
 
-Rozcestník načítá články v prostoru `3D:` a samostatně vypisuje soubory v úložišti s vazbami na modely, které je používají. Prohlížeč také umí otevřít článek přímo, například adresou `http://localhost:3000/?article=3D:Femur`. Server načte wikitext článku přes Action API a z bloku `<model3d>` získá název souboru, kameru, vzhled a všechny popisky.
+Rozcestník načítá články v prostoru `3D:` a samostatně vypisuje soubory v úložišti s vazbami na modely, které je používají. Prohlížeč také umí otevřít článek přímo, například adresou `http://localhost:3000/?article=3D:Femur`. Server načte wikitext článku přes Action API a z bloku `<model3d>` získá název souboru, nezávislé natočení tělesa (`orientation`), kameru, vzhled a všechny popisky. Položka `orientation` je volitelná a obsahuje kvaternion `[x, y, z, w]`; kamera proto může zůstat stejná i při opravě Z-up/Y-up orientace modelu.
 
 ```wikitext
 <model3d file="femur/Femur.glb">
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "title": "Femur",
   "description": "Model stehenní kosti.",
   "files": ["femur/Femur.glb"],
@@ -238,6 +240,7 @@ Rozcestník načítá články v prostoru `3D:` a samostatně vypisuje soubory v
     "clipY": 100,
     "clipZ": 100
   },
+  "orientation": { "quaternion": [0, 0, 0, 1] },
   "camera": { "position": [10, 5, 20], "target": [0, 0, 0] },
   "tags": [
     {

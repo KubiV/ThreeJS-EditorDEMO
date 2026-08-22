@@ -3,11 +3,14 @@ import path from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
 import { simplify } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
+import sharp from 'sharp';
 
 const LOW_RATIO = 0.12;
 const MEDIUM_RATIO = 0.45;
 const MAX_FALLBACK_PREVIEW_TRIANGLES = 850;
-const MAX_THUMBNAIL_TRIANGLES = 2200;
+const THUMBNAIL_WIDTH = 640;
+const THUMBNAIL_HEIGHT = 384;
+const THUMBNAIL_RENDER_SCALE = 2;
 const numberPattern = /[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?/gi;
 
 const emptyBounds = () => ({
@@ -183,19 +186,6 @@ async function simplifyIndexedMesh(mesh, ratio, bounds) {
   return { ...mesh, positions: preserveMeshBounds(mesh.positions.slice(), simplifiedIndices, bounds), indices: simplifiedIndices };
 }
 
-function trianglesFromIndexedMesh(mesh) {
-  const triangles = [];
-  for (let index = 0; index < mesh.indices.length; index += 3) {
-    const triangle = [];
-    for (let corner = 0; corner < 3; corner += 1) {
-      const vertex = mesh.indices[index + corner] * 3;
-      triangle.push(mesh.positions[vertex], mesh.positions[vertex + 1], mesh.positions[vertex + 2]);
-    }
-    if (triangle.every(Number.isFinite)) triangles.push(triangle);
-  }
-  return triangles;
-}
-
 async function writeSimplifiedStl(mesh, destination) {
   const triangleCount = Math.floor(mesh.indices.length / 3);
   const output = Buffer.alloc(84 + triangleCount * 50);
@@ -293,32 +283,51 @@ function gltfScan(document, { includeAllTriangles = false } = {}) {
   const bounds = emptyBounds();
   const preview = [];
   let count = 0;
-  document.getRoot().listMeshes().forEach((mesh) => mesh.listPrimitives().forEach((primitive) => {
+  const root = document.getRoot();
+  const instances = [];
+  const scene = root.listScenes()[0];
+  if (scene) {
+    scene.traverse((node) => {
+      const mesh = node.getMesh();
+      if (mesh) instances.push({ mesh, matrix: node.getWorldMatrix() });
+    });
+  } else {
+    const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    root.listMeshes().forEach((mesh) => instances.push({ mesh, matrix: identity }));
+  }
+  const transformPoint = (positions, index, matrix) => {
+    const x = positions[index * 3];
+    const y = positions[index * 3 + 1];
+    const z = positions[index * 3 + 2];
+    const w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15] || 1;
+    return [
+      (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) / w,
+      (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) / w,
+      (matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14]) / w
+    ];
+  };
+  instances.forEach(({ mesh, matrix }) => mesh.listPrimitives().forEach((primitive) => {
     const position = primitive.getAttribute('POSITION');
     if (!position) return;
     const positions = position.getArray();
     const indices = primitive.getIndices()?.getArray();
     const vertexCount = positions.length / 3;
     const triangleCount = Math.floor((indices ? indices.length : vertexCount) / 3);
-    const start = count;
     count += triangleCount;
     for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-      includePoint(bounds, [positions[vertex * 3], positions[vertex * 3 + 1], positions[vertex * 3 + 2]], -1);
+      includePoint(bounds, transformPoint(positions, vertex, matrix), -1);
     }
     const sample = includeAllTriangles
       ? 1
-      : Math.max(1, Math.ceil(triangleCount / Math.max(1, Math.floor(MAX_FALLBACK_PREVIEW_TRIANGLES / Math.max(document.getRoot().listMeshes().length, 1)))));
+      : Math.max(1, Math.ceil(triangleCount / Math.max(1, Math.floor(MAX_FALLBACK_PREVIEW_TRIANGLES / Math.max(instances.length, 1)))));
     for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += sample) {
       const triangle = [];
       for (let corner = 0; corner < 3; corner += 1) {
         const index = indices ? indices[triangleIndex * 3 + corner] : triangleIndex * 3 + corner;
-        triangle.push(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+        triangle.push(...transformPoint(positions, index, matrix));
       }
       if (triangle.every(Number.isFinite)) preview.push(triangle);
     }
-    // The thumbnail does not need exact extreme-face membership. glTF simplification
-    // preserves its original scene bounds, including node transforms.
-    if (start < 0) bounds.extremeFaces.add(start);
   }));
   return { count, bounds, preview };
 }
@@ -327,35 +336,107 @@ function projectPoint(point) {
   return [point[0] * 0.82 - point[2] * 0.82, point[1] - (point[0] + point[2]) * 0.34, point[0] * 0.27 + point[1] * 0.15 + point[2] * 0.27];
 }
 
-function renderThumbnail(triangles, bounds) {
-  const width = 640;
-  const height = 384;
-  if (!triangles.length || !isUsableBounds(bounds)) {
+function thumbnailTriangleCount(source) {
+  if (Array.isArray(source)) return source.length;
+  return Math.floor((source?.indices?.length || 0) / 3);
+}
+
+function forEachThumbnailTriangle(source, callback) {
+  if (Array.isArray(source)) {
+    source.forEach(callback);
+    return;
+  }
+  const positions = source?.positions;
+  const indices = source?.indices;
+  if (!positions || !indices) return;
+  for (let index = 0; index < indices.length; index += 3) {
+    const triangle = [];
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = indices[index + corner] * 3;
+      triangle.push(positions[vertex], positions[vertex + 1], positions[vertex + 2]);
+    }
+    if (triangle.every(Number.isFinite)) callback(triangle);
+  }
+}
+
+async function renderThumbnail(source, bounds) {
+  const width = THUMBNAIL_WIDTH;
+  const height = THUMBNAIL_HEIGHT;
+  if (!thumbnailTriangleCount(source) || !isUsableBounds(bounds)) {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Náhled 3D modelu"/>`;
   }
-  const projected = triangles.map((triangle) => {
-    const points = [0, 3, 6].map((offset) => projectPoint(triangle.slice(offset, offset + 3)));
-    const normal = stlNormal(triangle);
-    const light = Math.max(0.25, normal[0] * -0.35 + normal[1] * 0.72 + normal[2] * 0.6);
-    return { depth: points.reduce((sum, point) => sum + point[2], 0) / 3, light, points };
+  const rasterWidth = width * THUMBNAIL_RENDER_SCALE;
+  const rasterHeight = height * THUMBNAIL_RENDER_SCALE;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  forEachThumbnailTriangle(source, (triangle) => {
+    for (let offset = 0; offset < 9; offset += 3) {
+      const [x, y] = projectPoint(triangle.slice(offset, offset + 3));
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
   });
-  const allPoints = projected.flatMap((triangle) => triangle.points);
-  const minX = Math.min(...allPoints.map((point) => point[0]));
-  const maxX = Math.max(...allPoints.map((point) => point[0]));
-  const minY = Math.min(...allPoints.map((point) => point[1]));
-  const maxY = Math.max(...allPoints.map((point) => point[1]));
-  const scale = Math.min((width - 28) / Math.max(maxX - minX, 1e-9), (height - 28) / Math.max(maxY - minY, 1e-9));
+  const padding = 28 * THUMBNAIL_RENDER_SCALE;
+  const scale = Math.min(
+    (rasterWidth - padding) / Math.max(maxX - minX, 1e-9),
+    (rasterHeight - padding) / Math.max(maxY - minY, 1e-9)
+  );
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
-  projected.forEach((triangle) => {
-    triangle.points = triangle.points.map(([x, y]) => [width / 2 + (x - centerX) * scale, height / 2 - (y - centerY) * scale]);
-  });
-  projected.sort((a, b) => a.depth - b.depth);
-  const polygons = projected.map(({ points, light }) => {
+  const pixels = Buffer.alloc(rasterWidth * rasterHeight * 4);
+  const depthBuffer = new Float32Array(rasterWidth * rasterHeight);
+  depthBuffer.fill(-Infinity);
+
+  forEachThumbnailTriangle(source, (triangle) => {
+    const points = [0, 3, 6].map((offset) => {
+      const [x, y, depth] = projectPoint(triangle.slice(offset, offset + 3));
+      return [rasterWidth / 2 + (x - centerX) * scale, rasterHeight / 2 - (y - centerY) * scale, depth];
+    });
+    const denominator = (points[1][1] - points[2][1]) * (points[0][0] - points[2][0])
+      + (points[2][0] - points[1][0]) * (points[0][1] - points[2][1]);
+    if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-9) return;
+    const startX = Math.max(0, Math.floor(Math.min(points[0][0], points[1][0], points[2][0])));
+    const endX = Math.min(rasterWidth - 1, Math.ceil(Math.max(points[0][0], points[1][0], points[2][0])));
+    const startY = Math.max(0, Math.floor(Math.min(points[0][1], points[1][1], points[2][1])));
+    const endY = Math.min(rasterHeight - 1, Math.ceil(Math.max(points[0][1], points[1][1], points[2][1])));
+    const normal = stlNormal(triangle);
+    const light = Math.max(0.25, normal[0] * -0.35 + normal[1] * 0.72 + normal[2] * 0.6);
     const shade = Math.round(83 + Math.min(light, 1.45) * 67);
-    return `<path d="M${points.map((point) => point.map((value) => value.toFixed(1)).join(',')).join('L')}Z" fill="rgb(${shade},${Math.min(shade + 36, 210)},${Math.min(shade + 52, 224)})" stroke="#52798b" stroke-opacity=".16" stroke-width=".45"/>`;
-  }).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Náhled 3D modelu">${polygons}</svg>`;
+    const red = shade;
+    const green = Math.min(shade + 36, 210);
+    const blue = Math.min(shade + 52, 224);
+    for (let y = startY; y <= endY; y += 1) {
+      for (let x = startX; x <= endX; x += 1) {
+        const sampleX = x + 0.5;
+        const sampleY = y + 0.5;
+        const a = ((points[1][1] - points[2][1]) * (sampleX - points[2][0])
+          + (points[2][0] - points[1][0]) * (sampleY - points[2][1])) / denominator;
+        const b = ((points[2][1] - points[0][1]) * (sampleX - points[2][0])
+          + (points[0][0] - points[2][0]) * (sampleY - points[2][1])) / denominator;
+        const c = 1 - a - b;
+        if (a < -1e-7 || b < -1e-7 || c < -1e-7) continue;
+        const depth = a * points[0][2] + b * points[1][2] + c * points[2][2];
+        const pixelIndex = y * rasterWidth + x;
+        if (depth <= depthBuffer[pixelIndex]) continue;
+        depthBuffer[pixelIndex] = depth;
+        const offset = pixelIndex * 4;
+        pixels[offset] = red;
+        pixels[offset + 1] = green;
+        pixels[offset + 2] = blue;
+        pixels[offset + 3] = 255;
+      }
+    }
+  });
+
+  const png = await sharp(pixels, { raw: { width: rasterWidth, height: rasterHeight, channels: 4 } })
+    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Náhled 3D modelu"><image width="${width}" height="${height}" href="data:image/png;base64,${png.toString('base64')}"/></svg>`;
 }
 
 async function statInfo(filePath, triangles) {
@@ -364,9 +445,9 @@ async function statInfo(filePath, triangles) {
 }
 
 /**
- * Creates upload-time LOD files and an SVG thumbnail. The simplification keeps
- * model coordinates intact, so annotations and stored camera positions remain
- * reusable across Small, Medium and Original.
+ * Creates upload-time LOD files and an SVG-wrapped raster thumbnail rendered
+ * from the original geometry. LOD simplification keeps model coordinates intact,
+ * so annotations and stored camera positions remain reusable across variants.
  */
 export async function createModelArtifacts({ sourcePath, outputDirectory, originalFile }) {
   const extension = path.extname(originalFile).toLowerCase();
@@ -378,7 +459,7 @@ export async function createModelArtifacts({ sourcePath, outputDirectory, origin
     generation: { status: 'ready' }
   };
   let scan = { count: undefined, bounds: emptyBounds(), preview: [] };
-  let thumbnailTriangles;
+  let thumbnailSource;
 
   try {
     if (extension === '.stl') {
@@ -390,13 +471,11 @@ export async function createModelArtifacts({ sourcePath, outputDirectory, origin
       const largestDimension = Math.max(...scan.bounds.max.map((value, axis) => value - scan.bounds.min[axis]), 1);
       const weldTolerance = largestDimension * 1e-7;
       const mesh = createWeldedStlMesh(binary ? source : source.toString('utf8'), binary, weldTolerance);
-      const thumbnailRatio = Math.min(1, MAX_THUMBNAIL_TRIANGLES / Math.max(mesh.indices.length / 3, 1));
-      const [smallMesh, mediumMesh, thumbnailMesh] = await Promise.all([
+      thumbnailSource = mesh;
+      const [smallMesh, mediumMesh] = await Promise.all([
         simplifyIndexedMesh(mesh, LOW_RATIO, scan.bounds),
-        simplifyIndexedMesh(mesh, MEDIUM_RATIO, scan.bounds),
-        simplifyIndexedMesh(mesh, thumbnailRatio, scan.bounds)
+        simplifyIndexedMesh(mesh, MEDIUM_RATIO, scan.bounds)
       ]);
-      thumbnailTriangles = trianglesFromIndexedMesh(thumbnailMesh);
       const [smallTriangles, mediumTriangles] = await Promise.all([
         writeSimplifiedStl(smallMesh, path.join(outputDirectory, small)),
         writeSimplifiedStl(mediumMesh, path.join(outputDirectory, medium))
@@ -413,13 +492,11 @@ export async function createModelArtifacts({ sourcePath, outputDirectory, origin
       const small = `${stem}.small.obj`;
       const medium = `${stem}.medium.obj`;
       const mesh = createIndexedObjMesh(scan);
-      const thumbnailRatio = Math.min(1, MAX_THUMBNAIL_TRIANGLES / Math.max(mesh.indices.length / 3, 1));
-      const [smallMesh, mediumMesh, thumbnailMesh] = await Promise.all([
+      thumbnailSource = mesh;
+      const [smallMesh, mediumMesh] = await Promise.all([
         simplifyIndexedMesh(mesh, LOW_RATIO, scan.bounds),
-        simplifyIndexedMesh(mesh, MEDIUM_RATIO, scan.bounds),
-        simplifyIndexedMesh(mesh, thumbnailRatio, scan.bounds)
+        simplifyIndexedMesh(mesh, MEDIUM_RATIO, scan.bounds)
       ]);
-      thumbnailTriangles = trianglesFromIndexedMesh(thumbnailMesh);
       const [smallTriangles, mediumTriangles] = await Promise.all([
         writeSimplifiedObj(scan, smallMesh, path.join(outputDirectory, small)),
         writeSimplifiedObj(scan, mediumMesh, path.join(outputDirectory, medium))
@@ -433,11 +510,8 @@ export async function createModelArtifacts({ sourcePath, outputDirectory, origin
     } else if (extension === '.glb' || extension === '.gltf') {
       const io = new NodeIO();
       const previewDocument = await io.read(sourcePath);
-      scan = gltfScan(previewDocument);
-      const thumbnailRatio = Math.min(1, MAX_THUMBNAIL_TRIANGLES / Math.max(scan.count, 1));
-      const thumbnailDocument = await io.read(sourcePath);
-      await thumbnailDocument.transform(simplify({ simplifier: MeshoptSimplifier, ratio: thumbnailRatio, error: 0.005 }));
-      thumbnailTriangles = gltfScan(thumbnailDocument, { includeAllTriangles: true }).preview;
+      scan = gltfScan(previewDocument, { includeAllTriangles: true });
+      thumbnailSource = scan.preview;
       const small = `${stem}.small.glb`;
       const medium = `${stem}.medium.glb`;
       for (const [file, ratio] of [[small, LOW_RATIO], [medium, MEDIUM_RATIO]]) {
@@ -460,6 +534,6 @@ export async function createModelArtifacts({ sourcePath, outputDirectory, origin
     output.variantInfo = { original: await statInfo(sourcePath, scan.count) };
   }
 
-  await fs.writeFile(path.join(outputDirectory, output.thumbnailFile), renderThumbnail(thumbnailTriangles || scan.preview, scan.bounds), 'utf8');
+  await fs.writeFile(path.join(outputDirectory, output.thumbnailFile), await renderThumbnail(thumbnailSource || scan.preview, scan.bounds), 'utf8');
   return output;
 }

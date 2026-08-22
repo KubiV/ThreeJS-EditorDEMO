@@ -1,11 +1,11 @@
-import { brandMarkup, wikiSessionIndicatorMarkup } from './brand.js';
+import { brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
 
 export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = null, wikiSessionUserUrl = '', wikiSessionLoginUrl = '' }) {
   host.innerHTML = `
     <main class="wiki-shell about-page">
       <header class="wiki-topbar">
         ${brandMarkup({ interactive: true })}
-        <nav class="topbar-actions"><button type="button" class="topbar-link" data-action="home">← Zpět k modelům</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">⚙</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav>
+        <nav class="topbar-actions"><button type="button" class="topbar-link" data-action="home">← Zpět k modelům</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav>
       </header>
       <div class="wiki-page-layout">
         <article class="about-content">

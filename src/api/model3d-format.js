@@ -95,7 +95,7 @@ export function model3dTagFromModel(model, camera = model.camera) {
     sourceUrl: String(model.sourceUrl || '').trim()
   };
   const config = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     title: capitalizeTitle(model.title),
     description: model.description || '',
     ...(Array.isArray(model.rawFiles) && model.rawFiles.length ? { files: model.rawFiles } : {}),
@@ -104,10 +104,14 @@ export function model3dTagFromModel(model, camera = model.camera) {
     ...(Object.values(metadata).some(Boolean) ? { metadata } : {}),
     appearance: normalizeModelAppearance(model.appearance),
     ...(Array.isArray(model.categories) && model.categories.length ? { categories: normalizeCategoryDefinitions(model.categories) } : {}),
+    ...(finiteQuaternion(model.orientation?.quaternion) ? {
+      orientation: { quaternion: model.orientation.quaternion.map(rounded) }
+    } : {}),
     ...(camera?.position && camera?.target ? {
       camera: {
         position: camera.position.map(rounded),
-        target: camera.target.map(rounded)
+        target: camera.target.map(rounded),
+        ...(finiteQuaternion(camera.modelQuaternion) ? { modelQuaternion: camera.modelQuaternion.map(rounded) } : {})
       }
     } : {}),
     tags: (model.tags || []).map(({ id, title, category, position, normal, lineLength, description }) => ({
@@ -157,6 +161,12 @@ function parseJson(source, label) {
 function finiteVector(value, fallback) {
   if (!Array.isArray(value) || value.length !== 3 || value.some((number) => !Number.isFinite(Number(number)))) return fallback;
   return value.map(Number);
+}
+
+function finiteQuaternion(value) {
+  return Array.isArray(value) && value.length === 4
+    && value.every((number) => Number.isFinite(Number(number)))
+    && value.some((number) => Number(number) !== 0);
 }
 
 function cleanAssetPath(value) {
@@ -212,9 +222,13 @@ export function parseModel3dWikitext(wikitext) {
       metadata: cleanMetadata(config.metadata),
       appearance: normalizeModelAppearance(config.appearance),
       categories: normalizeCategoryDefinitions(config.categories),
+      ...(finiteQuaternion(config.orientation?.quaternion) ? {
+        orientation: { quaternion: config.orientation.quaternion.map(Number) }
+      } : {}),
       camera: config.camera && typeof config.camera === 'object' ? {
         position: finiteVector(config.camera.position, [10, 5, 20]),
-        target: finiteVector(config.camera.target, [0, 0, 0])
+        target: finiteVector(config.camera.target, [0, 0, 0]),
+        ...(finiteQuaternion(config.camera.modelQuaternion) ? { modelQuaternion: config.camera.modelQuaternion.map(Number) } : {})
       } : undefined,
       tags: Array.isArray(config.tags) ? config.tags.map(cleanTag).filter(Boolean) : []
     },

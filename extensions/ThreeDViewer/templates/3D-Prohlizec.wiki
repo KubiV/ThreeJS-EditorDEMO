@@ -8,6 +8,6 @@ Pro změnu popisků, kategorií nebo kamery otevřete model ve vieweru tlačítk
 
 Do běžného článku vložíte model šablonou <code><nowiki>{{3D prohlížeč|model=3D:Název modelu}}</nowiki></code>. Iframe zobrazí přímo u modelu ovladače kategorií, výběr popisku i jeho vysvětlení. Ve výchozím nastavení se před načtením zobrazí tlačítko; pro okamžité načtení použijte <code><nowiki>{{3D prohlížeč|model=3D:Název modelu|načíst po kliknutí=ne}}</nowiki></code>.
 
-Pokud článek potřebuje pouze odkaz do samostatného prohlížeče, použijte <code><nowiki>{{3D odkaz|model=3D:Název modelu}}</nowiki></code>. Odkaz se otevře v novém okně.
+Pokud článek potřebuje pouze odkaz do samostatného prohlížeče, použijte <code><nowiki>{{3D odkaz|model=3D:Název modelu}}</nowiki></code>. Odkaz se otevře v novém okně a ve výchozím nastavení zobrazí text „Otevřít interaktivní 3D prohlížeč“ s ikonou 3D krychle. Vlastní text odkazu nastavíte parametrem <code>text</code>, například <code><nowiki>{{3D odkaz|model=3D:Femur|text=Prohlédnout femur}}</nowiki></code>.
 
 Podrobný popis všech parametrů najdete na podstránkách [[Template:3D prohlížeč/dokumentace|Šablona:3D prohlížeč/dokumentace]] a [[Template:3D odkaz/dokumentace|Šablona:3D odkaz/dokumentace]].

@@ -102,11 +102,11 @@ class Hooks {
 				'class' => 'model3d-link-icon',
 				'xmlns' => 'http://www.w3.org/2000/svg',
 				'viewBox' => '0 0 32 32',
-				'width' => '30',
-				'height' => '30',
+				'width' => '15',
+				'height' => '15',
 				'aria-hidden' => 'true',
 				'focusable' => 'false',
-				'style' => 'display:inline-block;width:30px;height:30px;margin-left:.25rem;vertical-align:middle;'
+				'style' => 'display:inline-block;width:15px;height:15px;margin-left:.25rem;vertical-align:middle;'
 			],
 			'<path fill="#68c7f2" d="m16 15.5 13-7v14l-13 7z"/>' .
 			'<path fill="#2c83c5" d="m16 15.5 13 7-13 7z"/>' .

@@ -1,5 +1,5 @@
 import { escapeHtml } from '../annotations/wikitext.js';
-import { brandMarkup, wikiSessionIndicatorMarkup } from './brand.js';
+import { brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
 
 const pluralModels = (count) => (count === 1 ? 'model' : count >= 2 && count <= 4 ? 'modely' : 'modelů');
 const pluralTags = (count) => (count === 1 ? 'štítek' : count >= 2 && count <= 4 ? 'štítky' : 'štítků');
@@ -143,7 +143,7 @@ export function renderDashboard(host, models = [], options = {}) {
 
   host.innerHTML = `
     <main class="wiki-shell hub">
-      <header class="wiki-topbar">${brandMarkup()}<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">⚙</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav></header>
+      <header class="wiki-topbar">${brandMarkup()}<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav></header>
       <div class="wiki-page-layout"><div class="wiki-content"><section class="hub-hero">
           <div><p class="eyebrow">ROZCESTNÍK · 3D VIZUALIZACE</p><h1>Prohlížejte modely v prostoru.</h1><p>Interaktivní 3D modely, štítky a popisky připravené pro články vaší wiki.</p></div>
           <div class="hub-actions"><button class="button button-primary" data-action="upload">Nahrát 3D model</button></div>

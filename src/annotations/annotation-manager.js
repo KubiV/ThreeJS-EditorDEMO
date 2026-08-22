@@ -169,10 +169,12 @@ export class AnnotationManager {
       handle.visible = isVisible && tag.id === this.selectedId;
       // Markers are screen-legible but never use an absolute world-unit minimum.
       // That would turn a marker into a disk on models with a small coordinate range.
-      handle.scale.setScalar(this.markerRadius(end, 'handle') / HANDLE_RADIUS);
-      anchor.scale.setScalar(this.markerRadius(start, 'anchor') / ANCHOR_RADIUS);
+      const worldStart = this.sceneManager.contentPointToWorld(start);
+      const worldEnd = this.sceneManager.contentPointToWorld(end);
+      handle.scale.setScalar(this.markerRadius(worldEnd, 'handle') / HANDLE_RADIUS);
+      anchor.scale.setScalar(this.markerRadius(worldStart, 'anchor') / ANCHOR_RADIUS);
 
-      const projected = end.clone().project(camera);
+      const projected = worldEnd.clone().project(camera);
       const inView = projected.z > -1 && projected.z < 1 && projected.x > -1.12 && projected.x < 1.12 && projected.y > -1.12 && projected.y < 1.12;
       label.hidden = !isVisible || !inView;
       if (!label.hidden) {
@@ -215,7 +217,11 @@ export class AnnotationManager {
   showPreview(intersection, lineLength) {
     if (!intersection?.face) return this.hidePreview();
     const normal = intersection.face.normal.clone().transformDirection(intersection.object.matrixWorld).normalize();
-    this.showPreviewAt(intersection.point, normal, lineLength);
+    this.showPreviewAt(
+      this.sceneManager.worldPointToContent(intersection.point),
+      this.sceneManager.worldDirectionToContent(normal),
+      lineLength
+    );
   }
 
   showPreviewAt(position, normal, lineLength) {
@@ -244,11 +250,12 @@ export class AnnotationManager {
     const tag = this.tags.find((item) => item.id === hit.object.userData.annotationId);
     if (!tag) return false;
     const anchor = new THREE.Vector3().fromArray(tag.position);
+    const worldAnchor = this.sceneManager.contentPointToWorld(anchor);
     const cameraDirection = new THREE.Vector3().subVectors(this.sceneManager.camera.position, this.sceneManager.controls.target).normalize();
     this.drag = {
       tag,
       anchor,
-      plane: new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, anchor)
+      plane: new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, worldAnchor)
     };
     this.sceneManager.controls.enabled = false;
     return true;
@@ -258,7 +265,7 @@ export class AnnotationManager {
     if (!this.drag) return false;
     const point = this.sceneManager.getRay(event).intersectPlane(this.drag.plane, new THREE.Vector3());
     if (!point) return true;
-    const vector = point.sub(this.drag.anchor);
+    const vector = this.sceneManager.worldPointToContent(point).sub(this.drag.anchor);
     const length = vector.length();
     if (length < this.minimumLineLength()) return true;
     this.drag.tag.normal = vector.normalize().toArray();
