@@ -336,6 +336,75 @@ function projectPoint(point) {
   return [point[0] * 0.82 - point[2] * 0.82, point[1] - (point[0] + point[2]) * 0.34, point[0] * 0.27 + point[1] * 0.15 + point[2] * 0.27];
 }
 
+function finiteVector(value) {
+  return Array.isArray(value) && value.length === 3 && value.every((coordinate) => Number.isFinite(Number(coordinate)))
+    ? value.map(Number)
+    : undefined;
+}
+
+function finiteQuaternion(value) {
+  return Array.isArray(value) && value.length === 4 && value.every((coordinate) => Number.isFinite(Number(coordinate)))
+    && value.some((coordinate) => Number(coordinate) !== 0)
+    ? value.map(Number)
+    : undefined;
+}
+
+function normalize(vector) {
+  const length = Math.hypot(...vector);
+  return length > 1e-9 ? vector.map((value) => value / length) : undefined;
+}
+
+function subtract(left, right) {
+  return left.map((value, axis) => value - right[axis]);
+}
+
+function cross(left, right) {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0]
+  ];
+}
+
+function dot(left, right) {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function rotatePoint(point, quaternion) {
+  if (!quaternion) return point;
+  const [x, y, z, w] = quaternion;
+  const [px, py, pz] = point;
+  const ix = w * px + y * pz - z * py;
+  const iy = w * py + z * px - x * pz;
+  const iz = w * pz + x * py - y * px;
+  const iw = -x * px - y * py - z * pz;
+  return [
+    ix * w + iw * -x + iy * -z - iz * -y,
+    iy * w + iw * -y + iz * -x - ix * -z,
+    iz * w + iw * -z + ix * -y - iy * -x
+  ];
+}
+
+function thumbnailProjector({ camera, orientation } = {}) {
+  const quaternion = finiteQuaternion(orientation?.quaternion || orientation);
+  const position = finiteVector(camera?.position);
+  const target = finiteVector(camera?.target);
+  if (!position || !target) {
+    return (point) => projectPoint(rotatePoint(point, quaternion));
+  }
+  const towardCamera = normalize(subtract(position, target));
+  if (!towardCamera) return (point) => projectPoint(rotatePoint(point, quaternion));
+  // Preserve an upright image whenever possible. For top/bottom views the
+  // ordinary Y-up vector is parallel to the camera direction, so use Z-up.
+  const right = normalize(cross([0, 1, 0], towardCamera)) || normalize(cross([0, 0, 1], towardCamera));
+  const up = right && normalize(cross(towardCamera, right));
+  if (!right || !up) return (point) => projectPoint(rotatePoint(point, quaternion));
+  return (point) => {
+    const rotated = rotatePoint(point, quaternion);
+    return [dot(rotated, right), dot(rotated, up), dot(rotated, towardCamera)];
+  };
+}
+
 function thumbnailTriangleCount(source) {
   if (Array.isArray(source)) return source.length;
   return Math.floor((source?.indices?.length || 0) / 3);
@@ -359,7 +428,7 @@ function forEachThumbnailTriangle(source, callback) {
   }
 }
 
-async function renderThumbnail(source, bounds) {
+async function renderThumbnail(source, bounds, view = {}) {
   const width = THUMBNAIL_WIDTH;
   const height = THUMBNAIL_HEIGHT;
   if (!thumbnailTriangleCount(source) || !isUsableBounds(bounds)) {
@@ -367,13 +436,15 @@ async function renderThumbnail(source, bounds) {
   }
   const rasterWidth = width * THUMBNAIL_RENDER_SCALE;
   const rasterHeight = height * THUMBNAIL_RENDER_SCALE;
+  const project = thumbnailProjector(view);
+  const orientation = finiteQuaternion(view.orientation?.quaternion || view.orientation);
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
   forEachThumbnailTriangle(source, (triangle) => {
     for (let offset = 0; offset < 9; offset += 3) {
-      const [x, y] = projectPoint(triangle.slice(offset, offset + 3));
+      const [x, y] = project(triangle.slice(offset, offset + 3));
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x);
       minY = Math.min(minY, y);
@@ -393,7 +464,7 @@ async function renderThumbnail(source, bounds) {
 
   forEachThumbnailTriangle(source, (triangle) => {
     const points = [0, 3, 6].map((offset) => {
-      const [x, y, depth] = projectPoint(triangle.slice(offset, offset + 3));
+      const [x, y, depth] = project(triangle.slice(offset, offset + 3));
       return [rasterWidth / 2 + (x - centerX) * scale, rasterHeight / 2 - (y - centerY) * scale, depth];
     });
     const denominator = (points[1][1] - points[2][1]) * (points[0][0] - points[2][0])
@@ -403,7 +474,7 @@ async function renderThumbnail(source, bounds) {
     const endX = Math.min(rasterWidth - 1, Math.ceil(Math.max(points[0][0], points[1][0], points[2][0])));
     const startY = Math.max(0, Math.floor(Math.min(points[0][1], points[1][1], points[2][1])));
     const endY = Math.min(rasterHeight - 1, Math.ceil(Math.max(points[0][1], points[1][1], points[2][1])));
-    const normal = stlNormal(triangle);
+    const normal = stlNormal([0, 3, 6].flatMap((offset) => rotatePoint(triangle.slice(offset, offset + 3), orientation)));
     const light = Math.max(0.25, normal[0] * -0.35 + normal[1] * 0.72 + normal[2] * 0.6);
     const shade = Math.round(83 + Math.min(light, 1.45) * 67);
     const red = shade;
@@ -442,6 +513,36 @@ async function renderThumbnail(source, bounds) {
 async function statInfo(filePath, triangles) {
   const { size } = await fs.stat(filePath);
   return { bytes: size, ...(Number.isFinite(triangles) ? { triangles } : {}) };
+}
+
+async function thumbnailSourceFromModel({ sourcePath, originalFile }) {
+  const extension = path.extname(originalFile).toLowerCase();
+  if (extension === '.stl') {
+    const source = await fs.readFile(sourcePath);
+    const binary = isBinaryStl(source);
+    const scan = stlScan(binary ? source : source.toString('utf8'), binary);
+    const largestDimension = Math.max(...scan.bounds.max.map((value, axis) => value - scan.bounds.min[axis]), 1);
+    return {
+      source: createWeldedStlMesh(binary ? source : source.toString('utf8'), binary, largestDimension * 1e-7),
+      bounds: scan.bounds
+    };
+  }
+  if (extension === '.obj') {
+    const scan = objScan(await fs.readFile(sourcePath, 'utf8'));
+    return { source: createIndexedObjMesh(scan), bounds: scan.bounds };
+  }
+  if (extension === '.glb' || extension === '.gltf') {
+    const document = await new NodeIO().read(sourcePath);
+    const scan = gltfScan(document, { includeAllTriangles: true });
+    return { source: scan.preview, bounds: scan.bounds };
+  }
+  throw new Error('Náhled lze vytvořit pouze pro formát STL, OBJ, GLTF nebo GLB.');
+}
+
+/** Re-renders an existing thumbnail without touching the uploaded model or its LOD variants. */
+export async function regenerateModelThumbnail({ sourcePath, outputPath, originalFile, camera, orientation }) {
+  const { source, bounds } = await thumbnailSourceFromModel({ sourcePath, originalFile });
+  await fs.writeFile(outputPath, await renderThumbnail(source, bounds, { camera, orientation }), 'utf8');
 }
 
 /**

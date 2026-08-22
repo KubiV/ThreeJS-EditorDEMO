@@ -95,9 +95,13 @@ export function model3dTagFromModel(model, camera = model.camera) {
     sourceUrl: String(model.sourceUrl || '').trim()
   };
   const config = {
-    schemaVersion: 4,
+    schemaVersion: 7,
     title: capitalizeTitle(model.title),
     description: model.description || '',
+    // This is an account name, not the model's cited author.  It lets the
+    // server distinguish the uploader's editing rights from the metadata
+    // displayed to readers.
+    ...(String(model.uploadedBy || '').trim() ? { uploadedBy: String(model.uploadedBy).trim() } : {}),
     ...(Array.isArray(model.rawFiles) && model.rawFiles.length ? { files: model.rawFiles } : {}),
     ...(variants.medium || variants.small ? { variants: Object.fromEntries(Object.entries(variants).filter(([, value]) => value)) } : {}),
     ...(model.rawThumbnail ? { thumbnail: model.rawThumbnail } : {}),
@@ -114,15 +118,31 @@ export function model3dTagFromModel(model, camera = model.camera) {
         ...(finiteQuaternion(camera.modelQuaternion) ? { modelQuaternion: camera.modelQuaternion.map(rounded) } : {})
       }
     } : {}),
-    tags: (model.tags || []).map(({ id, title, category, position, normal, lineLength, description }) => ({
-      id,
-      title,
-      category: category || DEFAULT_CATEGORY_ID,
-      position: position.map(rounded),
-      normal: normal.map(rounded),
-      lineLength: rounded(lineLength),
-      description
-    }))
+    tags: (model.tags || []).map(({ id, title, category, position, normal, lineLength, description, highlight, style }) => {
+      const cleanHighlightValue = cleanHighlight(highlight);
+      const cleanStyleValue = cleanTagStyle(style);
+      return {
+        id,
+        title,
+        category: category || DEFAULT_CATEGORY_ID,
+        position: position.map(rounded),
+        normal: normal.map(rounded),
+        lineLength: rounded(lineLength),
+        ...(cleanStyleValue ? { style: cleanStyleValue } : {}),
+        ...(cleanHighlightValue ? {
+          highlight: {
+            colorMode: cleanHighlightValue.colorMode,
+            color: cleanHighlightValue.color,
+            radius: rounded(cleanHighlightValue.radius),
+            points: cleanHighlightValue.points.map((point) => ({
+              position: point.position.map(rounded),
+              normal: point.normal.map(rounded)
+            }))
+          }
+        } : {}),
+        description
+      };
+    })
   };
   const file = model.rawFile || model.file?.split('/').pop() || 'DOPLŇTE_NÁZEV_MODELU.glb';
   return `<model3d file="${quoteAttribute(file)}">\n${JSON.stringify(config, null, 2)}\n</model3d>`;
@@ -193,6 +213,8 @@ function cleanMetadata(value) {
 
 function cleanTag(tag, index) {
   if (!tag || typeof tag !== 'object') return null;
+  const highlight = cleanHighlight(tag.highlight);
+  const style = cleanTagStyle(tag.style);
   return {
     id: String(tag.id || `tag-${index + 1}`).slice(0, 100),
     title: String(tag.title || 'Nový štítek').slice(0, 160),
@@ -200,8 +222,32 @@ function cleanTag(tag, index) {
     position: finiteVector(tag.position, [0, 0, 0]),
     normal: finiteVector(tag.normal, [0, 0, 1]),
     lineLength: Number.isFinite(Number(tag.lineLength)) ? Math.max(0.0001, Number(tag.lineLength)) : 1.5,
+    ...(style ? { style } : {}),
+    ...(highlight ? { highlight } : {}),
     description: String(tag.description || '').slice(0, 20000)
   };
+}
+
+function cleanTagStyle(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const color = /^#[0-9a-f]{6}$/i.test(String(value.color || '')) ? String(value.color).toLowerCase() : '#d64b3b';
+  return { colorMode: value.colorMode === 'custom' ? 'custom' : 'category', color };
+}
+
+function cleanHighlight(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const color = /^#[0-9a-f]{6}$/i.test(String(value.color || '')) ? String(value.color).toLowerCase() : '#d64b3b';
+  // Existing painted labels stored just a colour. Keep those as explicit
+  // choices; all newly created labels use category-driven colour by default.
+  const colorMode = value.colorMode === 'category' ? 'category' : 'custom';
+  const radius = Number(value.radius);
+  if (!Number.isFinite(radius) || radius <= 0 || radius > 1000000) return undefined;
+  const points = (Array.isArray(value.points) ? value.points : []).slice(0, 240).flatMap((point) => {
+    const position = finiteVector(point?.position, undefined);
+    const normal = finiteVector(point?.normal, undefined);
+    return position && normal ? [{ position, normal }] : [];
+  });
+  return points.length ? { colorMode, color, radius, points } : undefined;
 }
 
 export function parseModel3dWikitext(wikitext) {
@@ -216,6 +262,7 @@ export function parseModel3dWikitext(wikitext) {
       schemaVersion: Number(config.schemaVersion) || 1,
       title: capitalizeTitle(String(config.title || '').slice(0, 120)),
       description: String(config.description || '').slice(0, 20000),
+      uploadedBy: String(config.uploadedBy || '').trim().slice(0, 255),
       files: Array.isArray(config.files) ? config.files.map((file) => String(file || '').trim()).filter(Boolean).slice(0, 20) : [],
       variants: cleanVariantMap(config.variants, attributes.file),
       thumbnail: cleanAssetPath(config.thumbnail),

@@ -1,5 +1,5 @@
 import { escapeHtml } from '../annotations/wikitext.js';
-import { brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
+import { actionIconMarkup, brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
 
 const pluralModels = (count) => (count === 1 ? 'model' : count >= 2 && count <= 4 ? 'modely' : 'modelů');
 const pluralTags = (count) => (count === 1 ? 'štítek' : count >= 2 && count <= 4 ? 'štítky' : 'štítků');
@@ -55,7 +55,11 @@ export function renderDashboard(host, models = [], options = {}) {
   const {
     files = [],
     onOpen = () => {},
+    onOpenInNewTab = () => {},
     onUpload = async () => {},
+    onEditModel = () => {},
+    onRegenerateThumbnail = async () => {},
+    onDeleteModel = async () => {},
     onAbout = () => {},
     onSettings = () => {},
     wikiSessionUser = null,
@@ -70,6 +74,7 @@ export function renderDashboard(host, models = [], options = {}) {
   // server is restarting). Keep the hub usable rather than letting an invalid
   // response take down the entire viewer.
   const modelList = Array.isArray(models) ? models : [];
+  const canEditModelInfo = Boolean(wikiSessionUser?.rights?.includes('edit'));
   const fileList = (Array.isArray(files) ? files : []).map(normalizeFileGroup);
   const modelPreviewsRequireLogin = Boolean(modelAccess?.requireLogin && !wikiSessionUser);
   const configuredFileSizeBytes = Number(upload?.maxFileSizeBytes);
@@ -115,7 +120,7 @@ export function renderDashboard(host, models = [], options = {}) {
           <h3>${escapeHtml(model.title)}</h3>
           <p>${escapeHtml(model.description || 'Bez doplňujícího popisu.')}</p>
           ${provenance ? `<small class="model-provenance">${escapeHtml(provenance)}</small>` : ''}
-          <div class="model-meta"><span>${tagCount} ${pluralTags(tagCount)}</span><button class="text-button" data-open="${escapeHtml(model.id)}">Otevřít model <span aria-hidden="true">→</span></button></div>
+          <div class="model-meta"><span>${tagCount} ${pluralTags(tagCount)}</span><button class="text-button" data-open-new="${escapeHtml(model.id)}">${actionIconMarkup('open')}Otevřít model</button></div>
         </div>
       </article>`;
   }).join('');
@@ -124,6 +129,17 @@ export function renderDashboard(host, models = [], options = {}) {
     const variants = Array.isArray(group.variants) ? group.variants : [];
     const extraFiles = Array.isArray(group.additionalFiles) ? group.additionalFiles : [];
     const usedBy = Array.isArray(group.models) ? group.models : [];
+    const managedModels = usedBy.map((usedModel) => modelList.find((model) => model.id === usedModel.id) || usedModel);
+    const managementActions = managedModels.map((model) => {
+      const permissions = model.managementPermissions || {};
+      const canManage = canEditModelInfo || (model.storageId && (permissions.canRegenerateThumbnail || permissions.canDelete));
+      if (!canManage) return '';
+      return `<div class="file-model-management" aria-label="Správa modelu ${escapeHtml(model.title)}"><b>${escapeHtml(model.title)}</b><div class="model-management-actions">
+        ${canEditModelInfo ? `<button type="button" class="small-button" data-edit-model="${escapeHtml(model.id)}">${actionIconMarkup('edit')}Upravit informace</button>` : ''}
+        ${model.storageId && permissions.canRegenerateThumbnail ? `<button type="button" class="small-button" data-regenerate-thumbnail="${escapeHtml(model.id)}">${actionIconMarkup('refresh')}Náhled</button>` : ''}
+        ${model.storageId && permissions.canDelete ? `<button type="button" class="small-button small-button-danger" data-delete-model="${escapeHtml(model.id)}">${actionIconMarkup('delete')}Odstranit</button>` : ''}
+      </div></div>`;
+    }).join('');
     const metadata = group.metadata || {};
     const sourceUrl = safeHttpUrl(metadata.sourceUrl);
     const metadataRows = [
@@ -138,7 +154,7 @@ export function renderDashboard(host, models = [], options = {}) {
       variants.length ? `${variants.length} ${variants.length === 1 ? 'varianta' : variants.length >= 2 && variants.length <= 4 ? 'varianty' : 'variant'}` : 'pouze originál',
       usedBy.length ? `${usedBy.length} ${pluralModels(usedBy.length)}` : ''
     ].filter(Boolean).join(' · ');
-    return `<details class="file-card file-group"><summary><span class="format format-${escapeHtml(String(original.format || '3D').toLowerCase())}">.${escapeHtml(String(original.format || '3D').toLowerCase())}</span><span><b>${escapeHtml(group.title || original.name || '3D soubor')}</b><small>${group.folder ? `Složka: ${escapeHtml(group.folder)}` : 'Soubor v kořeni úložiště'}</small></span><em>${escapeHtml(summaryFacts)}</em></summary><div class="file-group-details"><section class="file-tree"><p class="file-tree-heading">Nahraný původní model</p>${fileTreeRow(original, variantLabels.original, 'file-tree-original')}${variants.length ? `<div class="file-tree-variants"><p>Vygenerované varianty</p>${variants.map((variant) => fileTreeRow(variant, variantLabels[variant.variant] || variant.variant, 'file-tree-variant')).join('')}</div>` : ''}${extraFiles.length ? `<div class="file-tree-variants file-tree-extra"><p>Další nahrané soubory</p>${extraFiles.map((file) => fileTreeRow(file, 'Doprovodný soubor', 'file-tree-variant')).join('')}</div>` : ''}</section><section class="file-upload-info"><p class="file-tree-heading">Informace při nahrání</p>${metadataRows ? `<dl>${metadataRows}</dl>` : '<p class="file-empty">Informace o nahrání nejsou u tohoto staršího souboru uložené.</p>'}</section><section class="file-card-models"><p class="file-tree-heading">Použití v článcích 3D</p>${usedBy.length ? usedBy.map((model) => `<button type="button" class="text-button" data-open="${escapeHtml(model.id)}">${escapeHtml(model.title)} <span>${escapeHtml(model.article)}</span> →</button>`).join('') : '<p>Soubor zatím není použitý v žádném dostupném článku 3D.</p>'}</section></div></details>`;
+    return `<details class="file-card file-group"><summary><span class="format format-${escapeHtml(String(original.format || '3D').toLowerCase())}">.${escapeHtml(String(original.format || '3D').toLowerCase())}</span><span><b>${escapeHtml(group.title || original.name || '3D soubor')}</b><small>${group.folder ? `Složka: ${escapeHtml(group.folder)}` : 'Soubor v kořeni úložiště'}</small></span><em>${escapeHtml(summaryFacts)}</em></summary><div class="file-group-details"><section class="file-tree"><p class="file-tree-heading">Nahraný původní model</p>${fileTreeRow(original, variantLabels.original, 'file-tree-original')}${variants.length ? `<div class="file-tree-variants"><p>Vygenerované varianty</p>${variants.map((variant) => fileTreeRow(variant, variantLabels[variant.variant] || variant.variant, 'file-tree-variant')).join('')}</div>` : ''}${extraFiles.length ? `<div class="file-tree-variants file-tree-extra"><p>Další nahrané soubory</p>${extraFiles.map((file) => fileTreeRow(file, 'Doprovodný soubor', 'file-tree-variant')).join('')}</div>` : ''}</section><section class="file-upload-info"><p class="file-tree-heading">Informace při nahrání</p>${metadataRows ? `<dl>${metadataRows}</dl>` : '<p class="file-empty">Informace o nahrání nejsou u tohoto staršího souboru uložené.</p>'}</section><section class="file-card-models"><p class="file-tree-heading">Použití v článcích 3D</p>${usedBy.length ? usedBy.map((model) => `<button type="button" class="text-button" data-open="${escapeHtml(model.id)}">${actionIconMarkup('open')}${escapeHtml(model.title)} <span>${escapeHtml(model.article)}</span></button>`).join('') : '<p>Soubor zatím není použitý v žádném dostupném článku 3D.</p>'}${managementActions ? `<div class="file-management-list"><p class="file-tree-heading">Správa modelu</p>${managementActions}</div>` : ''}</section></div></details>`;
   }).join('');
 
   host.innerHTML = `
@@ -146,7 +162,7 @@ export function renderDashboard(host, models = [], options = {}) {
       <header class="wiki-topbar">${brandMarkup()}<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav></header>
       <div class="wiki-page-layout"><div class="wiki-content"><section class="hub-hero">
           <div><p class="eyebrow">ROZCESTNÍK · 3D VIZUALIZACE</p><h1>Prohlížejte modely v prostoru.</h1><p>Interaktivní 3D modely, štítky a popisky připravené pro články vaší wiki.</p></div>
-          <div class="hub-actions"><button class="button button-primary" data-action="upload">Nahrát 3D model</button></div>
+          <div class="hub-actions"><button class="button button-primary" data-action="upload">${actionIconMarkup('upload')}Nahrát 3D model</button></div>
         </section>
         <section class="hub-section">
           ${setupStatus}
@@ -178,7 +194,7 @@ export function renderDashboard(host, models = [], options = {}) {
             <small>na jeden soubor · najednou lze nahrát ${escapeHtml(uploadFileCountLabel)}</small>
           </div>
         </section>
-        <div class="form-actions"><button type="button" data-close class="button button-secondary">Zrušit</button><button class="button button-primary" type="submit">Nahrát model</button></div>
+        <div class="form-actions"><button type="button" data-close class="button button-secondary">${actionIconMarkup('cancel')}Zrušit</button><button class="button button-primary" type="submit">${actionIconMarkup('upload')}Nahrát model</button></div>
         <p class="form-message" role="status"></p>
       </form>
     </dialog>`;
@@ -188,6 +204,16 @@ export function renderDashboard(host, models = [], options = {}) {
   host.querySelector('[data-action="about"]').addEventListener('click', onAbout);
   host.querySelector('[data-action="user-settings"]').addEventListener('click', onSettings);
   host.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => onOpen(button.dataset.open)));
+  host.querySelectorAll('[data-open-new]').forEach((button) => button.addEventListener('click', () => onOpenInNewTab(button.dataset.openNew)));
+  host.querySelectorAll('[data-edit-model]').forEach((button) => button.addEventListener('click', () => onEditModel(button.dataset.editModel)));
+  host.querySelectorAll('[data-regenerate-thumbnail]').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await onRegenerateThumbnail(button.dataset.regenerateThumbnail); } finally { button.disabled = false; }
+  }));
+  host.querySelectorAll('[data-delete-model]').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await onDeleteModel(button.dataset.deleteModel); } finally { button.disabled = false; }
+  }));
   host.querySelectorAll('.model-thumbnail').forEach((image) => image.addEventListener('error', () => {
     const placeholder = document.createElement('span');
     placeholder.className = 'model-placeholder';

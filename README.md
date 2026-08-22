@@ -11,7 +11,7 @@
 - Tři strategie načítání uložené pro konkrétní zařízení: vybraná varianta, postupné S → M → originál nebo předdefinovaná varianta s tlačítkem pro originál. Vložený prohlížeč začíná malou variantou, pokud šablona neurčí jinou.
 - Anatomické **štítky** v prostoru s antialiasovanou vodicí čárou a samostatné bohaté **popisky** v panelu.
 - Levým tahem se otáčí samotné těleso virtuálním trackballem — bez pólových limitů a s volným náklonem kolem osy pohledu. Pravým tahem se posouvá pohled a kolečkem se přibližuje.
-- V uživatelském nastavení lze přepnout mezi původním orbitováním kamery, stabilním otáčením tělesa podle os a volným trackballem. Navigační kostka vpravo nahoře přepíná šest základních pohledů.
+- V uživatelském nastavení lze přepnout mezi původním orbitováním kamery, stabilním otáčením tělesa podle os a volným trackballem. Navigační kostka vpravo nahoře přepíná šest základních pohledů; pro samostatný a vložený prohlížeč ji lze zobrazit nezávisle (ve vloženém je výchozí stav skrytý).
 - Filtrování kategorií, plynulé zaměření kamery na štítek a URL odkazy typu `#model=ukazka-femur&tag=caput-femoris` (funguje i název souboru modelu).
 - Editor štítků: zvolte „Přidat štítek“ a klikněte na povrch modelu. Vybraný zlatý koncový bod vodicí čáry lze táhnout myší; tím se průběžně uloží její směr do `normal` i vzdálenost do `lineLength`. Pro jemné doladění lze v režimu úprav podržet `Shift` nebo `L` a otáčet kolečkem.
 - Jednoduchý bezpečný renderer Wikitextu pro interní odkazy jako `[[Aorta|Srdečnice]]`.
@@ -65,6 +65,74 @@ npm start
 
 Pro nasazení do jiné, již běžící MediaWiki včetně HTTPS, rozšíření, šablon a provozu Node.js služby použijte samostatný [produkční návod](docs/instalace-do-existujici-mediawiki.md).
 
+## Aktualizace již nasazené aplikace
+
+Při aktualizaci vždy aktualizujte **Node.js aplikaci i rozšíření
+`ThreeDViewer` v MediaWiki ze stejného commitu/verze**. Než začnete, naplánujte
+krátké servisní okno. Nikdy nemažte ani nepřepisujte `LocalSettings.js` a
+úložiště modelů (`storage/`, případně adresář nastavený v
+`storage.directory`): obsahují produkční konfiguraci a nahrané modely.
+
+Následující příklad předpokládá instalaci podle produkčního návodu, tedy zdroj
+aplikace v `/opt/wikiskripta-3d`, službu `wikiskripta-3d` a MediaWiki v
+`/var/www/mediawiki`. Cesty, uživatele a větev si upravte podle vlastního
+serveru.
+
+1. Zálohujte databázi MediaWiki, `LocalSettings.js`, úložiště modelů včetně
+   `models.json` a případné vlastní úpravy souborů v
+   `extensions/ThreeDViewer/` nebo wiki šablon. Pokud je úložiště mimo adresář
+   aplikace (doporučené produkční nastavení), zálohujte jeho skutečnou cestu.
+2. Porovnejte lokální konfiguraci s novým `LocalSettings.example.js` a nové
+   položky ručně doplňte do `LocalSettings.js`. Ukázkový soubor na něj
+   nekopírujte: obsahuje výchozí hodnoty a neobsahuje produkční tajemství.
+3. Zastavte službu a stáhněte novou verzi. Před `git pull` musí být pracovní
+   strom čistý; případné lokální změny nejprve uložte mimo produkční kopii
+   nebo je přeneste do vlastního commitu.
+
+   ```bash
+   sudo systemctl stop wikiskripta-3d
+   cd /opt/wikiskripta-3d
+   git status --short
+   git pull --ff-only
+   sudo -u wikiskripta3d npm ci
+   sudo -u wikiskripta3d npm run build
+   ```
+
+   Pokud aplikaci na server nenahráváte přes Git, nahraďte krok `git pull`
+   rozbalením/zkopírováním nové verze pouze do adresáře zdrojů. Vynechte při
+   tom `LocalSettings.js` a adresář s produkčními modely. V produkci
+   nepoužívejte `git clean -fdx`, protože by mohl odstranit soubory potřebné
+   pro běh aplikace.
+4. Aktualizujte odpovídající rozšíření v MediaWiki a spusťte její standardní
+   aktualizaci:
+
+   ```bash
+   sudo rsync -a --delete /opt/wikiskripta-3d/extensions/ThreeDViewer/ \
+     /var/www/mediawiki/extensions/ThreeDViewer/
+   cd /var/www/mediawiki
+   php maintenance/update.php
+   php extensions/ThreeDViewer/maintenance/seedPages.php
+   ```
+
+   `rsync --delete` zde smí mířit pouze na přesně uvedený adresář rozšíření a
+   až po jeho záloze. Příkaz `seedPages.php` bez parametrů založí jen chybějící
+   stránky. Nepouštějte `--force` automaticky: přepsal by existující wiki
+   šablony a jejich případné redakční úpravy. Změny šablon nejprve porovnejte
+   s novou verzí v `extensions/ThreeDViewer/templates/` a přeneste je vědomě.
+5. Znovu spusťte službu a ověřte její stav i základní funkce:
+
+   ```bash
+   sudo systemctl start wikiskripta-3d
+   sudo systemctl status --no-pager wikiskripta-3d
+   curl -fsS https://3d.example.org/api/wiki/status
+   ```
+
+   Odpověď posledního příkazu má obsahovat `"isReady": true` a prázdné
+   `issues`. Nakonec otevřete prohlížeč, ověřte načtení existujícího modelu a
+   jako přihlášený uživatel vyzkoušejte uložení drobné změny štítku. Při selhání
+   služby zkontrolujte `journalctl -u wikiskripta-3d -n 100 --no-pager`; z
+   provozu se vracejte pouze z připravené zálohy, ne mazáním datového úložiště.
+
 Při prvním zprovoznění lokální wiki vytvořte ukázkové články a šablony
 bezpečným, opakovatelným příkazem. Existující stránky nepřepíše:
 
@@ -111,6 +179,34 @@ MediaWiki a právo `read`; `public` model zpřístupní všem včetně přímé 
 raw URL v nové kartě. Odpovědi modelů se navíc nesmí ukládat do sdílené cache.
 Pro omezení režimu `login-required` například na studenty a vyučující nastavte
 `allowedGroups: ['student', 'teacher']`.
+
+### Oprávnění ke správě nahraných modelů
+
+Každý nový záznam si uloží MediaWiki jméno uživatele, který model nahrál.
+Výchozí nastavení zachovává chování starších instalací: každý přihlášený účet
+s právem `edit` může modely upravovat a nahrávat. V `LocalSettings.js` lze
+později zapnout omezení úprav jen na vlastníka nahrání a doplnit účty s
+oprávněním spravovat všechny modely nebo jen provádět citlivější akce:
+
+```js
+security: {
+  // …stávající nastavení…
+  modelManagement: {
+    requireOwnershipForEdits: false,
+    editors: ['JanaNovakova'],
+    deleters: ['Spravce3D'],
+    thumbnailRegenerators: ['Spravce3D', 'JanaNovakova']
+  }
+}
+```
+
+Jména se porovnávají bez ohledu na velikost písmen. Nastavení
+`requireOwnershipForEdits: true` zapne přísný režim: upravovat může jen vlastník
+nahrání nebo účet v `editors`; ponechte ho jako `false`, dokud starší záznamy
+nemají doplněného vlastníka. Mazání odstraní složku modelu i jeho článek `3D:`;
+účet proto musí mít vedle zápisu v `deleters` také právo `delete` v MediaWiki.
+Přegenerování náhledu je dostupné v pokročilém rozhraní po uložení výchozího
+pohledu/natočení a zachová stejný vizuální styl jako původní náhled.
 
 Pro ověření relace musí cookie MediaWiki přicházet i k Node aplikaci. Použijte
 stejný host pro wiki a prohlížeč, nebo bezpečně nastavte společnou cookie doménu
@@ -290,7 +386,9 @@ php extensions/ThreeDViewer/maintenance/seedPages.php
   Parametr `varianta` přijímá `malá` (výchozí), `střední` nebo `originál`.
   Parametr `načíst po kliknutí` je výchozí `ano`: iframe zobrazí tlačítko a
   model načte až po potvrzení návštěvníkem. Nastavte `ne`, chcete-li model
-  načíst ihned.
+  načíst ihned. Navigační kostka se ve vloženém prohlížeči ve výchozím
+  nastavení nezobrazuje; návštěvník ji může zapnout ve svém uživatelském
+  nastavení prohlížeče.
 
 - `Template:3D odkaz` otevře viewer v novém okně; za textem je klikací ikona 3D krychle:
 

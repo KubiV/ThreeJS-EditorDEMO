@@ -1,18 +1,19 @@
 import './ui/styles.css';
+import * as THREE from 'three';
 import { AnnotationManager } from './annotations/annotation-manager.js';
 import { escapeHtml } from './annotations/wikitext.js';
 import { DEFAULT_MODEL_APPEARANCE, capitalizeTitle, categoryTagFromDefinitions, normalizeModelAppearance, replaceCategoryTag, replaceModel3dTag } from './api/model3d-format.js';
 import { createModel3dTag, fetchWikiConfig, fetchWikiSessionUser, fetchWikiStatus, publishWithWikiSession } from './api/mediawiki.js';
-import { fetchWikiCategories, fetchWikiIndex, fetchWikiModel, saveModel, uploadModel } from './api/models.js';
+import { deleteModel, fetchModelPermissions, fetchWikiCategories, fetchWikiIndex, fetchWikiModel, regenerateModelThumbnail, saveModel, uploadModel } from './api/models.js';
 import { applyMaterialSettings, findMaterialFile, loadModel } from './core/loaders.js';
 import { SceneManager } from './core/scene-manager.js';
 import { renderDashboard } from './ui/dashboard.js';
 import { renderAboutPage } from './ui/about.js';
-import { brandMarkup, setBranding, settingsIconMarkup, wikiSessionIndicatorMarkup } from './ui/brand.js';
-import { showCategoryDialog, showTagDialog } from './ui/dialogs.js';
+import { actionIconMarkup, brandMarkup, setBranding, settingsIconMarkup, wikiSessionIndicatorMarkup } from './ui/brand.js';
+import { showCategoryDialog, showModelInfoDialog } from './ui/dialogs.js';
 import { categoryDefinitions, renderSidebar } from './ui/sidebar.js';
-import { renderTagDraftPanel } from './ui/tag-draft-panel.js';
-import { showToast } from './ui/toast.js';
+import { renderTagDraftPanel, renderTagEditorPanel } from './ui/tag-draft-panel.js';
+import { hidePersistentNotice, showPersistentNotice, showToast } from './ui/toast.js';
 
 const app = document.querySelector('#app');
 const defaultSettings = () => ({
@@ -22,7 +23,8 @@ const defaultSettings = () => ({
   onDemandLod: 'medium',
   interfaceMode: 'simple',
   navigationMode: 'orbit',
-  showNavigationCube: true,
+  showNavigationCubeStandalone: true,
+  showNavigationCubeEmbedded: false,
   embeddedLod: 'small',
   embeddedPanelMode: 'list',
   awaitingEmbeddedLoad: false,
@@ -33,6 +35,7 @@ const defaultSettings = () => ({
   loadingStatus: 'Připravuji pracovní plochu…',
   editMode: false,
   canEdit: true,
+  modelPermissions: { canEdit: false, canDelete: false, canRegenerateThumbnail: false },
   wikiDirty: false,
   defaultViewDirty: false,
   defaultOrientationDirty: false,
@@ -51,13 +54,16 @@ let sceneManager;
 let annotationManager;
 let leaderKeyActive = false;
 let ignoreNextClick = false;
+let brushStroke = null;
 let tagDraft;
+let tagEditor;
 let wikiConfig = {
   endpoint: '',
   pagePrefix: '',
   isConfigured: false,
   isReadable: false,
   modelAccess: { mode: 'login-required', requireLogin: true, restrictedToGroups: false },
+  modelManagement: { requireOwnershipForEdits: false },
   // These values keep the upload guidance useful until the server
   // configuration is loaded. A successful API response always replaces them.
   upload: { maxFileSizeBytes: 50 * 1024 * 1024, maxFiles: 5, allowedExtensions: ['.stl', '.obj', '.mtl', '.gltf', '.glb'] },
@@ -88,13 +94,24 @@ function applyBranding(branding = {}) {
 function readDeviceSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(deviceSettingsKey) || '{}');
+    // Previous releases had one shared switch. Keep it for the standalone
+    // viewer, while new embedded viewers use their intentionally quieter
+    // default unless the visitor explicitly opts in.
+    const legacyNavigationCube = typeof saved.showNavigationCube === 'boolean'
+      ? saved.showNavigationCube
+      : undefined;
     return {
       loadStrategy: ['fixed', 'progressive', 'on-demand'].includes(saved.loadStrategy) ? saved.loadStrategy : 'fixed',
       lod: ['small', 'low', 'medium', 'original'].includes(saved.lod) ? saved.lod : 'original',
       onDemandLod: ['small', 'low', 'medium'].includes(saved.onDemandLod) ? saved.onDemandLod : 'medium',
       interfaceMode: saved.interfaceMode === 'advanced' ? 'advanced' : 'simple',
       navigationMode: ['orbit', 'turntable', 'trackball'].includes(saved.navigationMode) ? saved.navigationMode : 'orbit',
-      showNavigationCube: typeof saved.showNavigationCube === 'boolean' ? saved.showNavigationCube : true
+      showNavigationCubeStandalone: typeof saved.showNavigationCubeStandalone === 'boolean'
+        ? saved.showNavigationCubeStandalone
+        : legacyNavigationCube ?? true,
+      showNavigationCubeEmbedded: typeof saved.showNavigationCubeEmbedded === 'boolean'
+        ? saved.showNavigationCubeEmbedded
+        : false
     };
   } catch {
     return {};
@@ -109,7 +126,8 @@ function saveDeviceSettings() {
       onDemandLod: settings.onDemandLod,
       interfaceMode: settings.interfaceMode,
       navigationMode: settings.navigationMode,
-      showNavigationCube: settings.showNavigationCube
+      showNavigationCubeStandalone: settings.showNavigationCubeStandalone,
+      showNavigationCubeEmbedded: settings.showNavigationCubeEmbedded
     }));
   } catch {
     // A privacy-restricted browser may deny local storage; loading still works for this session.
@@ -280,7 +298,7 @@ function ensureModelCategories(model = currentModel) {
 }
 
 function renderError(error) {
-  app.innerHTML = `<main class="error-page"><h1>Nepodařilo se otevřít prohlížeč</h1><p>${error.message}</p><button class="button button-primary" id="retry">Zkusit znovu</button></main>`;
+  app.innerHTML = `<main class="error-page"><h1>Nepodařilo se otevřít prohlížeč</h1><p>${error.message}</p><button class="button button-primary" id="retry">${actionIconMarkup('refresh')}Zkusit znovu</button></main>`;
   app.querySelector('#retry').addEventListener('click', initialize);
 }
 
@@ -307,6 +325,24 @@ async function refreshWikiSessionUser() {
   return wikiSessionUser;
 }
 
+async function addHubManagementPermissions(modelList) {
+  if (!wikiSessionUser?.rights?.includes('edit')) return modelList;
+  const permissions = await Promise.all(modelList.map(async (model) => {
+    try {
+      return await fetchModelPermissions({ storageId: model.storageId, article: model.article, rawFile: model.rawFile });
+    } catch {
+      return undefined;
+    }
+  }));
+  return modelList.map((model, index) => ({
+    ...model,
+    ...(permissions[index] ? {
+      storageId: permissions[index].storageId || model.storageId,
+      managementPermissions: permissions[index]
+    } : {})
+  }));
+}
+
 async function initialize() {
   try {
     wikiIndexProblem = '';
@@ -330,6 +366,7 @@ async function initialize() {
         fetchWikiCategories().catch(() => ({ article: wikiConfig.categoryPage || '', categories: [], wikitext: '' }))
       ]);
       models = Array.isArray(wikiIndex?.models) ? wikiIndex.models : [];
+      models = await addHubManagementPermissions(models);
       storedFiles = Array.isArray(wikiIndex?.fileGroups) ? wikiIndex.fileGroups : (Array.isArray(wikiIndex?.files) ? wikiIndex.files : []);
       categoryCatalog = {
         article: String(categoryResponse?.article || wikiConfig.categoryPage || ''),
@@ -370,8 +407,37 @@ function renderHub({ clearHash = true } = {}) {
     wikiSessionUserUrl: wikiUserPageUrl(),
     wikiSessionLoginUrl: wikiConfig.loginUrl,
     onOpen: (id) => openIndexedWikiModel(models.find((model) => model.id === id)),
+    onOpenInNewTab: (id) => {
+      const model = models.find((item) => item.id === id);
+      if (!model?.article) return;
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('article', model.article);
+      url.hash = '';
+      window.open(url.toString(), '_blank', 'noopener');
+    },
     onAbout: renderAbout,
     onSettings: renderUserSettingsPage,
+    onEditModel: (modelId) => {
+      const model = models.find((item) => item.id === modelId);
+      openModelInfoEditor(model).catch((error) => showToast(error.message, 'error'));
+    },
+    onRegenerateThumbnail: async (modelId) => {
+      const model = models.find((item) => item.id === modelId);
+      if (!model?.storageId) return;
+      const result = await regenerateModelThumbnail(model.storageId);
+      model.thumbnail = result.thumbnail;
+      renderHub({ clearHash: false });
+      showToast(`Náhled modelu „${model.title}“ byl přegenerován.`);
+    },
+    onDeleteModel: async (modelId) => {
+      const model = models.find((item) => item.id === modelId);
+      if (!model?.storageId) return;
+      if (!window.confirm(`Opravdu odstranit model „${model.title}“ včetně jeho souborů a článku ${model.article || '3D'}?`)) return;
+      await deleteModel(model.storageId);
+      await initialize();
+      showToast(`Model „${model.title}“ byl odstraněn.`);
+    },
     onUpload: async (formData) => {
       if (!wikiConfig.isReadable) throw new Error('Pro nahrání modelu je třeba připojit MediaWiki a vytvořit článek ve jmenném prostoru 3D.');
       const title = capitalizeTitle(formData.get('title'));
@@ -446,33 +512,32 @@ function viewerMarkup() {
   const wiki = isWikiModel();
   const embedGate = embedded && settings.awaitingEmbeddedLoad ? `
     <div class="embed-load-gate" data-embed-load-gate>
-      <div><p class="eyebrow">3D prohlížeč</p><h1>${escapeHtml(currentModel?.title || '3D model')}</h1><button type="button" class="button button-primary" data-action="load-embedded-model">Načíst</button><p class="embed-load-note">Plný prohlížeč otevřete tlačítkem „Otevřít“ vlevo nahoře.</p></div>
+      <div><p class="eyebrow">3D prohlížeč</p><h1>${escapeHtml(currentModel?.title || '3D model')}</h1><button type="button" class="button button-primary" data-action="load-embedded-model">${actionIconMarkup('upload')}Načíst</button><p class="embed-load-note">Plný prohlížeč otevřete tlačítkem „Otevřít“ vlevo nahoře.</p></div>
     </div>` : '';
   const modeControl = !embedded && wiki ? `
     <nav class="mode-switch" aria-label="Režim stránky">
       <span class="mode-switch-label">Režim</span>
       <button type="button" class="mode-tab ${settings.canEdit ? '' : 'is-active'}" ${settings.canEdit ? 'data-action="mode-toggle" data-mode="read"' : ''}>Čtení</button>
       <button type="button" class="mode-tab ${settings.canEdit ? 'is-active' : ''}" ${settings.canEdit ? '' : 'data-action="mode-toggle" data-mode="edit"'}>Úpravy</button>
-      ${settings.canEdit ? '<button type="button" class="topbar-save" data-action="wiki-save" title="Uložit konfiguraci do definujícího článku 3D">Uložit do článku 3D</button>' : ''}
+      ${settings.canEdit ? `<button type="button" class="topbar-save" data-action="wiki-save" title="Uložit">${actionIconMarkup('save')}ULOŽIT</button>` : ''}
     </nav>` : '';
   const topbarActions = embedded ? '' : `<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav>`;
   const toolbarActions = embedded
-    ? `<a class="toolbar-button toolbar-link" href="${standaloneViewerUrl()}" target="_blank" rel="noopener noreferrer" title="Otevřít plnohodnotný prohlížeč"><span class="toolbar-logo" aria-hidden="true"></span>Otevřít</a>`
+    ? `<a class="toolbar-button toolbar-link" href="${standaloneViewerUrl()}" target="_blank" rel="noopener noreferrer" title="Otevřít plnohodnotný prohlížeč"><span class="toolbar-logo" aria-hidden="true"></span>${actionIconMarkup('open')}Otevřít</a>`
     : '';
   const viewportToolbar = toolbarActions ? `<div class="viewport-toolbar">${toolbarActions}</div>` : '';
   const navigationCube = `<div class="navigation-cube" role="group" aria-label="Navigační kostka: rychlé nastavení směru pohledu">
-    <div class="navigation-cube-main"><button type="button" class="navigation-cube-face navigation-cube-top" data-nav-face="top" aria-label="Horní pohled" title="Horní pohled">H</button><button type="button" class="navigation-cube-face navigation-cube-front" data-nav-face="front" aria-label="Přední pohled" title="Přední pohled">P</button><button type="button" class="navigation-cube-face navigation-cube-right" data-nav-face="right" aria-label="Pravý pohled" title="Pravý pohled">Pr</button></div>
-    <div class="navigation-cube-opposites"><button type="button" data-nav-face="bottom" aria-label="Dolní pohled" title="Dolní pohled">D</button><button type="button" data-nav-face="left" aria-label="Levý pohled" title="Levý pohled">L</button><button type="button" data-nav-face="back" aria-label="Zadní pohled" title="Zadní pohled">Z</button></div>
+    <div class="navigation-cube-main"><button type="button" class="navigation-cube-face navigation-cube-top" data-nav-face="top" aria-label="Pohled shora" title="Pohled shora">Shora</button><button type="button" class="navigation-cube-face navigation-cube-front" data-nav-face="front" aria-label="Pohled zepředu" title="Pohled zepředu">Zepředu</button><button type="button" class="navigation-cube-face navigation-cube-right" data-nav-face="right" aria-label="Pohled zprava" title="Pohled zprava">Zprava</button><div class="navigation-cube-opposites"><button type="button" class="navigation-cube-bottom" data-nav-face="bottom" aria-label="Pohled zdola" title="Pohled zdola">Zdola</button><button type="button" class="navigation-cube-left" data-nav-face="left" aria-label="Pohled zleva" title="Pohled zleva">Zleva</button><button type="button" class="navigation-cube-back" data-nav-face="back" aria-label="Pohled zezadu" title="Pohled zezadu">Zezadu</button></div></div>
+    <button type="button" class="navigation-cube-reset" data-nav-reset aria-label="Resetovat polohu pohledu" title="Resetovat polohu pohledu">${actionIconMarkup('refresh')}Reset polohy</button>
   </div>`;
-  const footerContent = `${embedded ? '<button class="footer-link" data-action="about">O 3D prohlížeči</button>' : ''}${wikiSessionUser ? '' : '<span>Pro úpravy se přihlaste do MediaWiki.</span>'}${returnTo ? `<a class="footer-link" href="${escapeHtml(returnTo)}">Zpět na článek</a>` : ''}`;
+  const footerContent = `${embedded ? `<button class="footer-link" data-action="about">${actionIconMarkup('info')}O 3D prohlížeči</button>` : ''}${wikiSessionUser ? '' : '<span>Pro úpravy se přihlaste do MediaWiki.</span>'}${returnTo ? `<a class="footer-link" href="${escapeHtml(returnTo)}">${actionIconMarkup('back')}Zpět na článek</a>` : ''}`;
   app.innerHTML = `
     <main class="viewer ${embedded ? 'is-embedded' : ''} ${settings.awaitingEmbeddedLoad ? 'is-awaiting-load' : ''}">
       <header class="wiki-topbar">${brandMarkup({ interactive: true })}${modeControl}${topbarActions}</header>
       <div class="viewer-body"><section class="viewport">
           ${viewportToolbar}
-          ${settings.showNavigationCube ? navigationCube : ''}
+          ${(embedded ? settings.showNavigationCubeEmbedded : settings.showNavigationCubeStandalone) ? navigationCube : ''}
           <div id="canvas"></div><div id="annotation-layer" aria-label="Štítky modelu"></div><div id="tag-draft-host"></div>
-          <div class="edit-hint" hidden>Nový štítek: nastavte údaje v panelu, najeďte na povrch a kliknutím vyberte ukotvení.</div>
           ${embedGate}
         </section>
         <div id="sidebar-host"></div></div>
@@ -511,11 +576,37 @@ async function openModel(model, tagId, lod = 'original') {
     if (!settings.embedded && isWikiEditRoute()) {
       try {
         wikiSessionUser = await fetchWikiSessionUser(wikiConfig.endpoint);
-        settings.canEdit = Boolean(wikiSessionUser) && wikiSessionUser.rights.includes('edit');
-        if (!settings.canEdit) showToast('Režim úprav vyžaduje přihlášený účet s právem upravovat stránky.', 'error');
+        if (!wikiSessionUser || !wikiSessionUser.rights.includes('edit')) {
+          showToast('Režim úprav vyžaduje přihlášený účet MediaWiki s právem upravovat stránky.', 'error');
+        } else {
+          // The default policy intentionally mirrors pre-ownership releases:
+          // a MediaWiki editor can edit every model. The optional permissions
+          // lookup only becomes an editing gate in strict owner-only mode.
+          settings.canEdit = true;
+          try {
+            settings.modelPermissions = await fetchModelPermissions({ storageId: model.storageId, article: model.article, rawFile: model.rawFile });
+            if (settings.modelPermissions.storageId) model.storageId = settings.modelPermissions.storageId;
+            if (wikiConfig.modelManagement?.requireOwnershipForEdits) {
+              settings.canEdit = settings.modelPermissions.canEdit;
+              if (!settings.canEdit) showToast('Váš účet nemá pro tento model povolené úpravy.', 'error');
+            }
+          } catch (error) {
+            if (wikiConfig.modelManagement?.requireOwnershipForEdits) throw error;
+            // The auxiliary management check must not lock out a normal
+            // editor when upgrading an older server or an old model record.
+          }
+        }
       } catch (error) {
         showToast(`Nelze ověřit přihlášení MediaWiki: ${error.message}`, 'error');
       }
+    }
+    if (!settings.embedded && !isWikiEditRoute()) {
+      fetchModelPermissions({ storageId: model.storageId, article: model.article, rawFile: model.rawFile }).then((permissions) => {
+        if (currentModel !== model) return;
+        settings.modelPermissions = permissions;
+        if (permissions.storageId) model.storageId = permissions.storageId;
+        renderCurrentSidebar();
+      }).catch(() => {});
     }
   }
   restoreTagDraft();
@@ -533,17 +624,22 @@ async function openModel(model, tagId, lod = 'original') {
     },
     onChange: (_tag, { transient }) => {
       if (!transient) {
+        if (tagEditor?.tag === _tag) {
+          tagEditor.draft.lineLength = _tag.lineLength;
+          renderTagDraft();
+        }
         persistModel();
         renderCurrentSidebar();
       }
     }
   });
   renderTagDraft();
-  if (tagDraft) document.querySelector('.edit-hint').hidden = false;
+  if (tagDraft) updateTagDraftNotice();
   attachViewportInteractions();
   document.querySelectorAll('[data-nav-face]').forEach((button) => button.addEventListener('click', () => {
     sceneManager.snapToFace(button.dataset.navFace);
   }));
+  document.querySelector('[data-nav-reset]')?.addEventListener('click', () => handleSidebarAction('reset'));
   document.querySelector('[data-action="wiki-save"]')?.addEventListener('click', saveWikiModel);
   document.querySelectorAll('[data-action="mode-toggle"]').forEach((button) => button.addEventListener('click', () => {
     if (button.dataset.mode === 'read') exitWikiEdit();
@@ -660,14 +756,15 @@ function userSettingsContent() {
       <label>Režim<select data-user-setting="loadStrategy"><option value="fixed" ${settings.loadStrategy === 'fixed' ? 'selected' : ''}>Vybraná varianta</option><option value="progressive" ${settings.loadStrategy === 'progressive' ? 'selected' : ''}>Postupně od malé</option><option value="on-demand" ${settings.loadStrategy === 'on-demand' ? 'selected' : ''}>Na vyžádání originálu</option></select></label>
       ${settings.loadStrategy === 'fixed' ? `<label>Varianta<select data-user-setting="lod">${userVariantOption('small', 'Malá (S)', settings.lod)}${userVariantOption('medium', 'Střední (M)', settings.lod)}${userVariantOption('original', 'Originál', settings.lod)}</select></label>` : ''}
       ${settings.loadStrategy === 'progressive' ? '<p class="setting-note">Nejdřív se zobrazí S, poté se na pozadí načte M a nakonec originál.</p>' : ''}
-      ${settings.loadStrategy === 'on-demand' ? `<label>Výchozí varianta<select data-user-setting="onDemandLod">${userVariantOption('small', 'Malá (S)', settings.onDemandLod)}${userVariantOption('medium', 'Střední (M)', settings.onDemandLod)}</select></label>${currentModel ? '<button type="button" class="small-button" data-user-action="prefer-original">Po návratu načíst originál</button>' : ''}` : ''}
+      ${settings.loadStrategy === 'on-demand' ? `<label>Výchozí varianta<select data-user-setting="onDemandLod">${userVariantOption('small', 'Malá (S)', settings.onDemandLod)}${userVariantOption('medium', 'Střední (M)', settings.onDemandLod)}</select></label>${currentModel ? `<button type="button" class="small-button" data-user-action="prefer-original">${actionIconMarkup('upload')}Po návratu načíst originál</button>` : ''}` : ''}
       ${availabilityNote}
     </section>`;
   const navigationSettings = `
     <section class="navigation-settings"><h2>Ovládání 3D prostoru</h2>
       <label>Způsob otáčení<select data-user-setting="navigationMode"><option value="orbit" ${settings.navigationMode === 'orbit' ? 'selected' : ''}>Původní — pohled kolem modelu</option><option value="turntable" ${settings.navigationMode === 'turntable' ? 'selected' : ''}>Těleso — stabilní otočení</option><option value="trackball" ${settings.navigationMode === 'trackball' ? 'selected' : ''}>Těleso — volný trackball</option></select></label>
-      <label class="navigation-cube-toggle"><input type="checkbox" data-user-setting="showNavigationCube" ${settings.showNavigationCube ? 'checked' : ''}> Zobrazit navigační kostku</label>
-      <p class="setting-note">Původní režim otáčí kamerou. Stabilní otočení používá pevné osy X/Y; volný trackball dovolí i náklon kolem směru pohledu. Navigační kostka vpravo nahoře rychle nastaví šest základních směrů.</p>
+      <label class="navigation-cube-toggle"><input type="checkbox" data-user-setting="showNavigationCubeStandalone" ${settings.showNavigationCubeStandalone ? 'checked' : ''}> Zobrazit navigační kostku v plnohodnotném prohlížeči</label>
+      <label class="navigation-cube-toggle"><input type="checkbox" data-user-setting="showNavigationCubeEmbedded" ${settings.showNavigationCubeEmbedded ? 'checked' : ''}> Zobrazit navigační kostku ve vloženém prohlížeči</label>
+      <p class="setting-note">Původní režim otáčí kamerou. Stabilní otočení používá pevné osy X/Y; volný trackball dovolí i náklon kolem směru pohledu. Navigační kostka vpravo nahoře rychle nastaví šest základních směrů. Ve vloženém prohlížeči je ve výchozím nastavení skrytá.</p>
     </section>`;
   return `
     <label>Rozhraní<select data-user-setting="interfaceMode"><option value="simple" ${settings.interfaceMode === 'simple' ? 'selected' : ''}>Jednoduché</option><option value="advanced" ${settings.interfaceMode === 'advanced' ? 'selected' : ''}>Pokročilé</option></select></label>
@@ -703,7 +800,7 @@ function renderUserSettingsPage() {
       <div class="wiki-page-layout"><article class="user-settings-content">
         <header class="settings-page-heading"><p class="eyebrow">UŽIVATELSKÉ NASTAVENÍ</p><h1>Prohlížeč</h1><p>Nastavení platí pro toto zařízení a uloží se i pro další modely.</p></header>
         <section class="settings-page-form" aria-label="Uživatelské nastavení prohlížeče">${userSettingsContent()}</section>
-        <div class="settings-page-actions"><button type="button" class="button button-primary" data-action="settings-back">${model ? '← Zpět k modelu' : '← Zpět k modelům'}</button></div>
+        <div class="settings-page-actions"><button type="button" class="button button-primary" data-action="settings-back">${actionIconMarkup('back')}${model ? 'Zpět k modelu' : 'Zpět k modelům'}</button></div>
       </article></div>
     </main>`;
   bindUserSettings(app);
@@ -717,7 +814,7 @@ function renderUserSettingsPage() {
 
 function updateUserSetting(key, value) {
   if (key === 'loadStrategy' || key === 'interfaceMode' || key === 'navigationMode') settings[key] = value;
-  else if (key === 'showNavigationCube') settings[key] = Boolean(value);
+  else if (['showNavigationCubeStandalone', 'showNavigationCubeEmbedded'].includes(key)) settings[key] = Boolean(value);
   else if (key === 'lod' || key === 'onDemandLod') settings[key] = normalizedLod(value);
   else if (key === 'wireframe') settings[key] = Boolean(value);
   else settings[key] = Number.isNaN(Number(value)) ? value : Number(value);
@@ -737,7 +834,7 @@ function updateUserSetting(key, value) {
     if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
     return;
   }
-  if (key === 'showNavigationCube') {
+  if (['showNavigationCubeStandalone', 'showNavigationCubeEmbedded'].includes(key)) {
     if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
     else openModel(currentModel, selectedTag?.id);
     return;
@@ -760,6 +857,52 @@ function updateModelAppearance(key, value) {
   const output = control?.closest('label')?.querySelector('output');
   if (output) output.textContent = key === 'opacity' ? `${Math.round(settings.opacity * 100)} %` : String(settings[key]);
   persistModel();
+}
+
+function updateModelInfo(key, value) {
+  if (!currentModel || !['title', 'description', 'license', 'author', 'origin', 'sourceUrl'].includes(key)) return;
+  const limits = { title: 120, description: 20000, license: 160, author: 160, origin: 300, sourceUrl: 1000 };
+  const cleaned = String(value || '').trim().slice(0, limits[key]);
+  currentModel[key] = key === 'title' ? capitalizeTitle(cleaned) : cleaned;
+  persistModel();
+}
+
+async function openModelInfoEditor(model = currentModel) {
+  if (!model?.article) throw new Error('Model nemá definující článek 3D, do kterého lze informace uložit.');
+  const editableModel = model.wikitext ? model : await fetchWikiModel(model.article);
+  showModelInfoDialog(editableModel, {
+    onSave: async (changes) => {
+      const next = {
+        ...editableModel,
+        ...changes,
+        title: capitalizeTitle(changes.title)
+      };
+      const parserTag = createModel3dTag(next);
+      const wikitext = replaceModel3dTag(editableModel.wikitext, parserTag);
+      const result = await publishWithWikiSession({
+        endpoint: wikiConfig.endpoint,
+        title: editableModel.article,
+        text: wikitext,
+        summary: 'Aktualizace informací o 3D modelu'
+      });
+      Object.assign(editableModel, next, { wikitext });
+      const index = models.findIndex((item) => item.id === editableModel.id || item.article === editableModel.article);
+      if (index >= 0) Object.assign(models[index], next);
+      if (currentModel?.article === editableModel.article) {
+        Object.assign(currentModel, next, { wikitext });
+        renderCurrentSidebar();
+      } else {
+        renderHub({ clearHash: false });
+      }
+      showToast(`Informace o modelu uložil uživatel ${result.user.name}.`);
+    }
+  });
+}
+
+function editLeaderLine() {
+  if (!settings.canEdit || !selectedTag) return;
+  annotationManager.select(selectedTag.id, { focus: false });
+  showToast('Přetáhněte barevný kruh u plovoucího štítku. Tím změníte polohu vodicí čáry.');
 }
 
 function modelIsReady() {
@@ -790,7 +933,7 @@ function saveDefaultView() {
   settings.defaultViewDirty = true;
   persistModel({ defaultView: true });
   renderCurrentSidebar();
-  showToast('Aktuální pohled je nastaven. Pro trvalé uložení klikněte nahoře na „Uložit do článku 3D“.');
+  showToast('Aktuální pohled je nastaven. Pro trvalé uložení klikněte nahoře na „ULOŽIT“.');
 }
 
 function clearDefaultView() {
@@ -801,7 +944,7 @@ function clearDefaultView() {
   sceneManager?.resetView();
   persistModel({ defaultView: true });
   renderCurrentSidebar();
-  showToast('Automatický pohled je připraven. Zapište změnu tlačítkem „Uložit do článku 3D“ nahoře.');
+  showToast('Automatický pohled je připraven. Zapište změnu tlačítkem „ULOŽIT“ nahoře.');
 }
 
 function toggleRotationGizmo() {
@@ -835,7 +978,7 @@ function saveDefaultOrientation() {
   settings.rotationGizmoVisible = false;
   sceneManager.setRotationGizmoVisible(false);
   renderCurrentSidebar();
-  showToast('Výchozí natočení tělesa je nastaveno. Pro trvalé uložení klikněte nahoře na „Uložit změny do článku 3D“.');
+  showToast('Výchozí natočení tělesa je nastaveno. Pro trvalé uložení klikněte nahoře na „ULOŽIT“.');
 }
 
 function clearDefaultOrientation() {
@@ -850,6 +993,67 @@ function clearDefaultOrientation() {
   persistModel({ defaultOrientation: true });
   renderCurrentSidebar();
   showToast('Výchozí natočení tělesa bylo vráceno do původní orientace.');
+}
+
+async function regenerateCurrentModelThumbnail() {
+  if (!currentModel?.storageId) return;
+  if (settings.wikiDirty) {
+    showToast('Nejprve uložte výchozí pohled a natočení do článku 3D.', 'error');
+    return;
+  }
+  try {
+    const result = await regenerateModelThumbnail(currentModel.storageId);
+    currentModel.thumbnail = result.thumbnail;
+    updateIndexedModelThumbnail(result.thumbnail);
+    showToast('Náhled byl přegenerován podle uloženého pohledu modelu.');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+function updateIndexedModelThumbnail(thumbnail) {
+  if (!currentModel) return;
+  const index = models.findIndex((model) => model.storageId === currentModel.storageId
+    || (model.article && model.article === currentModel.article));
+  if (index >= 0) models[index] = { ...models[index], thumbnail };
+}
+
+async function regenerateCurrentModelThumbnailFromCurrentView() {
+  if (!currentModel?.storageId) return;
+  if (!modelIsReady()) {
+    showToast('Náhled lze vytvořit až po dokončení načítání modelu.', 'error');
+    return;
+  }
+  const camera = sceneManager?.captureCameraState();
+  const quaternion = sceneManager?.contentQuaternion();
+  if (!camera || !quaternion) {
+    showToast('Aktuální pohled modelu se nepodařilo zjistit.', 'error');
+    return;
+  }
+  try {
+    const result = await regenerateModelThumbnail(currentModel.storageId, {
+      useCurrentView: true,
+      camera: { position: [...camera.position], target: [...camera.target] },
+      orientation: { quaternion: [...quaternion] }
+    });
+    currentModel.thumbnail = result.thumbnail;
+    updateIndexedModelThumbnail(result.thumbnail);
+    showToast('Náhled byl vytvořen z aktuální polohy a natočení modelu.');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function deleteCurrentModel() {
+  if (!currentModel?.storageId) return;
+  if (!window.confirm(`Opravdu odstranit model „${currentModel.title}“ včetně jeho souborů a článku ${currentModel.article || '3D'}?`)) return;
+  try {
+    await deleteModel(currentModel.storageId);
+    showToast(`Model „${currentModel.title}“ byl odstraněn.`);
+    await initialize();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
 }
 
 function renderCurrentSidebar() {
@@ -893,6 +1097,7 @@ function renderCurrentSidebar() {
       renderCurrentSidebar();
     },
     appearance: updateModelAppearance,
+    info: updateModelInfo,
     action: handleSidebarAction
   });
 }
@@ -914,6 +1119,11 @@ function handleSidebarAction(action) {
   if (action === 'toggle-rotation-gizmo') toggleRotationGizmo();
   if (action === 'save-default-orientation') saveDefaultOrientation();
   if (action === 'clear-default-orientation') clearDefaultOrientation();
+  if (action === 'edit-model-info') openModelInfoEditor().catch((error) => showToast(error.message, 'error'));
+  if (action === 'regenerate-thumbnail') regenerateCurrentModelThumbnail();
+  if (action === 'regenerate-thumbnail-current') regenerateCurrentModelThumbnailFromCurrentView();
+  if (action === 'delete-model') deleteCurrentModel();
+  if (action === 'edit-leader-line') editLeaderLine();
   if (action === 'show-all') {
     annotationManager.showAll(true);
     settings.categories = new Set((currentModel.tags || []).map((tag) => tag.category));
@@ -943,6 +1153,25 @@ function attachViewportInteractions() {
   const canvas = sceneManager.renderer.domElement;
   canvas.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
+    if (tagDraft?.brushMode) {
+      const hit = sceneManager.intersectModel(event);
+      if (!hit?.face) {
+        // Brush mode deliberately locks navigation even when a gesture begins
+        // beside the mesh; otherwise a missed stroke can rotate the model.
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      brushStroke = { pointerId: event.pointerId, controlsEnabled: sceneManager.controls.enabled };
+      // OrbitControls registers its normal pointer handler on the canvas as
+      // well. Disabling it in capture phase keeps a brush stroke from also
+      // starting a camera/model rotation.
+      sceneManager.controls.enabled = false;
+      paintDraftAt(hit);
+      canvas.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      return;
+    }
     if (settings.canEdit && annotationManager.beginHandleDrag(event)) {
       canvas.setPointerCapture?.(event.pointerId);
       event.preventDefault();
@@ -952,15 +1181,33 @@ function attachViewportInteractions() {
       canvas.setPointerCapture?.(event.pointerId);
       event.preventDefault();
     }
-  });
+  }, true);
   canvas.addEventListener('pointermove', (event) => {
+    if (brushStroke?.pointerId === event.pointerId) {
+      const hit = sceneManager.intersectModel(event);
+      if (hit?.face) paintDraftAt(hit);
+      return;
+    }
     if (annotationManager.dragHandle(event)) return;
     if (sceneManager.dragContentRotation(event)) return;
+    if (tagEditor?.repositioningAnchor) {
+      annotationManager.showPreview(sceneManager.intersectModel(event), tagEditor.draft.lineLength);
+      return;
+    }
     if (!tagDraft) return;
     if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
     else annotationManager.showPreview(sceneManager.intersectModel(event), tagDraft.lineLength);
   });
   canvas.addEventListener('pointerup', (event) => {
+    if (brushStroke?.pointerId === event.pointerId) {
+      const { controlsEnabled } = brushStroke;
+      brushStroke = null;
+      sceneManager.controls.enabled = controlsEnabled;
+      canvas.releasePointerCapture?.(event.pointerId);
+      ignoreNextClick = true;
+      renderTagDraft();
+      return;
+    }
     if (sceneManager.consumeRotationGizmoChange()) {
       // Dragging the rings is itself an edit. Stage it immediately so the
       // global save button writes exactly the orientation the editor sees.
@@ -981,17 +1228,33 @@ function attachViewportInteractions() {
     }
   });
   canvas.addEventListener('pointerleave', () => {
-    if (!annotationManager.drag && !tagDraft?.position) annotationManager.hidePreview();
+    if (!annotationManager.drag && !tagDraft?.position && !tagEditor?.draft.position) annotationManager.hidePreview();
+  });
+  canvas.addEventListener('pointercancel', (event) => {
+    if (brushStroke?.pointerId !== event.pointerId) return;
+    const { controlsEnabled } = brushStroke;
+    brushStroke = null;
+    sceneManager.controls.enabled = controlsEnabled;
   });
   canvas.addEventListener('click', (event) => {
     if (ignoreNextClick) {
       ignoreNextClick = false;
       return;
     }
-    if (!settings.canEdit || !tagDraft) return;
+    if (!settings.canEdit || (!tagDraft && !tagEditor?.repositioningAnchor) || tagDraft?.brushMode) return;
     const hit = sceneManager.intersectModel(event);
     if (!hit?.face) return;
     const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+    if (tagEditor?.repositioningAnchor) {
+      tagEditor.draft.position = sceneManager.worldPointToContent(hit.point).toArray();
+      tagEditor.draft.normal = sceneManager.worldDirectionToContent(normal).toArray();
+      tagEditor.repositioningAnchor = false;
+      tagEditor.hasEditedAnchor = true;
+      annotationManager.showPreviewAt(tagEditor.draft.position, tagEditor.draft.normal, tagEditor.draft.lineLength);
+      renderTagDraft();
+      showToast('Nový bod na modelu je vybraný. Uložte změny štítku.');
+      return;
+    }
     tagDraft.position = sceneManager.worldPointToContent(hit.point).toArray();
     tagDraft.normal = sceneManager.worldDirectionToContent(normal).toArray();
     annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
@@ -1012,6 +1275,32 @@ function attachViewportInteractions() {
     persistModel();
     renderCurrentSidebar();
   }, { passive: false });
+}
+
+function paintDraftAt(hit) {
+  if (!tagDraft?.brushMode || !hit?.face) return false;
+  const position = sceneManager.worldPointToContent(hit.point).toArray();
+  const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+  const normal = sceneManager.worldDirectionToContent(worldNormal).toArray();
+  const colorMode = tagDraft.brushColorMode === 'custom' ? 'custom' : 'category';
+  const color = colorMode === 'custom' ? tagDraft.brushColor : categoryBrushColor(tagDraft.category);
+  tagDraft.highlight ||= { colorMode, color, radius: tagDraft.brushRadius, points: [] };
+  const radius = Number(tagDraft.brushRadius || tagDraft.highlight.radius);
+  const previous = tagDraft.highlight.points.at(-1);
+  if (previous && new THREE.Vector3().fromArray(previous.position).distanceTo(new THREE.Vector3().fromArray(position)) < radius * 0.32) return false;
+  if (tagDraft.highlight.points.length >= 240) return false;
+  tagDraft.highlight.colorMode = colorMode;
+  tagDraft.highlight.color = color;
+  tagDraft.highlight.radius = radius;
+  tagDraft.highlight.points.push({ position, normal });
+  if (!tagDraft.position) {
+    tagDraft.position = position;
+    tagDraft.normal = normal;
+    annotationManager.showPreviewAt(position, normal, tagDraft.lineLength);
+  }
+  annotationManager.showBrushPreview(tagDraft.highlight);
+  saveTagDraft();
+  return true;
 }
 
 function draftLineLimits(requestedLineLength) {
@@ -1050,6 +1339,21 @@ function draftLineLimits(requestedLineLength) {
   };
 }
 
+function draftBrushLimits(requestedRadius) {
+  const bounds = sceneManager?.modelBounds;
+  const size = bounds && !bounds.isEmpty()
+    ? Math.max(...bounds.getSize(new THREE.Vector3()).toArray(), 0.0001)
+    : 10;
+  const brushMinRadius = Math.max(size * 0.003, 0.0001);
+  const brushStep = Math.max(size * 0.002, 0.0001);
+  const brushMaxRadius = Math.max(size * 0.18, brushMinRadius + brushStep);
+  const requested = Number(requestedRadius);
+  const brushRadius = Number.isFinite(requested)
+    ? Math.min(brushMaxRadius, Math.max(brushMinRadius, requested))
+    : Math.max(size * 0.025, brushMinRadius);
+  return { brushMinRadius, brushMaxRadius, brushStep, brushRadius };
+}
+
 function tagDraftStorageKey(model = currentModel) {
   const identity = model?.article || model?.id;
   return identity ? `${tagDraftStoragePrefix}${encodeURIComponent(identity)}` : '';
@@ -1058,9 +1362,9 @@ function tagDraftStorageKey(model = currentModel) {
 function saveTagDraft() {
   const key = tagDraftStorageKey();
   if (!key || !tagDraft || !settings.canEdit) return;
-  const { id, title, category, description, position, normal, lineLength } = tagDraft;
+  const { id, title, category, description, position, normal, lineLength, brushMode, brushColorMode, brushColor, brushRadius, highlight } = tagDraft;
   try {
-    localStorage.setItem(key, JSON.stringify({ version: 1, id, title, category, description, position, normal, lineLength }));
+    localStorage.setItem(key, JSON.stringify({ version: 2, id, title, category, description, position, normal, lineLength, brushMode, brushColorMode, brushColor, brushRadius, highlight }));
   } catch {
     // The active editing session remains usable if browser storage is unavailable.
   }
@@ -1080,15 +1384,32 @@ function validDraftVector(value) {
   return Array.isArray(value) && value.length === 3 && value.every((coordinate) => Number.isFinite(Number(coordinate)));
 }
 
+function validDraftHighlight(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.points)) return undefined;
+  const color = /^#[0-9a-f]{6}$/i.test(String(value.color || '')) ? String(value.color).toLowerCase() : '#d64b3b';
+  const radius = Number(value.radius);
+  const points = value.points.slice(0, 240).flatMap((point) => validDraftVector(point?.position) && validDraftVector(point?.normal)
+    ? [{ position: point.position.map(Number), normal: point.normal.map(Number) }]
+    : []);
+  const colorMode = value.colorMode === 'category' ? 'category' : 'custom';
+  return Number.isFinite(radius) && radius > 0 && points.length ? { colorMode, color, radius, points } : undefined;
+}
+
+function categoryBrushColor(categoryId) {
+  return currentCategoryDefinitions().find((category) => category.id === categoryId)?.color || '#d64b3b';
+}
+
 function restoreTagDraft() {
   const key = tagDraftStorageKey();
   if (!key || !settings.canEdit || !isWikiModel()) return false;
   try {
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!saved || saved.version !== 1) return false;
+    if (!saved || ![1, 2].includes(saved.version)) return false;
     const limits = draftLineLimits(saved.lineLength);
+    const brushLimits = draftBrushLimits(saved.brushRadius);
     const categories = currentCategoryDefinitions();
     const requestedLength = Number(saved.lineLength);
+    const highlight = validDraftHighlight(saved.highlight);
     tagDraft = {
       id: String(saved.id || `tag-${crypto.randomUUID()}`).slice(0, 100),
       title: String(saved.title || '').slice(0, 160),
@@ -1096,6 +1417,11 @@ function restoreTagDraft() {
       description: String(saved.description || '').slice(0, 20000),
       position: validDraftVector(saved.position) ? saved.position.map(Number) : undefined,
       normal: validDraftVector(saved.normal) ? saved.normal.map(Number) : undefined,
+      brushMode: Boolean(saved.brushMode || highlight),
+      brushColorMode: highlight?.colorMode || (saved.brushColorMode === 'custom' ? 'custom' : 'category'),
+      brushColor: highlight?.color || (/^#[0-9a-f]{6}$/i.test(String(saved.brushColor || '')) ? saved.brushColor : '#d64b3b'),
+      ...brushLimits,
+      ...(highlight ? { highlight } : {}),
       ...limits,
       lineLength: Number.isFinite(requestedLength) ? Math.min(limits.maxLineLength, Math.max(limits.minLineLength, requestedLength)) : limits.lineLength
     };
@@ -1109,18 +1435,22 @@ function restoreTagDraft() {
 function syncTagDraftToModel() {
   if (!tagDraft || !sceneManager?.modelBounds || sceneManager.modelBounds.isEmpty()) return;
   const limits = draftLineLimits(tagDraft.lineLength);
+  const brushLimits = draftBrushLimits(tagDraft.brushRadius);
   tagDraft = {
     ...tagDraft,
     ...limits,
+    ...brushLimits,
     lineLength: Math.min(limits.maxLineLength, Math.max(limits.minLineLength, Number(tagDraft.lineLength) || limits.lineLength))
   };
   if (tagDraft.position && tagDraft.normal) annotationManager?.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
+  if (tagDraft.highlight) annotationManager?.showBrushPreview(tagDraft.highlight);
   saveTagDraft();
   renderTagDraft();
 }
 
 function openTagDraft() {
   const limits = draftLineLimits();
+  const brushLimits = draftBrushLimits();
   const categories = currentCategoryDefinitions();
   tagDraft = {
     id: `tag-${crypto.randomUUID()}`,
@@ -1129,11 +1459,15 @@ function openTagDraft() {
     description: '',
     position: undefined,
     normal: undefined,
+    brushMode: false,
+    brushColorMode: 'category',
+    brushColor: categoryBrushColor(categories[0]?.id),
+    ...brushLimits,
     ...limits
   };
   settings.editMode = true;
   saveTagDraft();
-  document.querySelector('.edit-hint').hidden = false;
+  updateTagDraftNotice();
   renderTagDraft();
   renderCurrentSidebar();
 }
@@ -1143,8 +1477,8 @@ function closeTagDraft() {
   tagDraft = undefined;
   settings.editMode = false;
   annotationManager?.hidePreview();
-  const hint = document.querySelector('.edit-hint');
-  if (hint) hint.hidden = true;
+  annotationManager?.hideBrushPreview();
+  hidePersistentNotice('tag-draft');
   renderTagDraft();
   renderCurrentSidebar();
 }
@@ -1152,20 +1486,50 @@ function closeTagDraft() {
 function renderTagDraft() {
   const host = document.querySelector('#tag-draft-host');
   if (!host) return;
+  if (tagEditor) {
+    renderTagEditorPanel(host, tagEditor.draft, {
+      categories: currentCategoryDefinitions(),
+      onChange: (changes) => {
+        Object.assign(tagEditor.draft, changes);
+        if (tagEditor.draft.style.colorMode !== 'custom') tagEditor.draft.style.color = categoryBrushColor(tagEditor.draft.category);
+      },
+      onCancel: closeTagEditor,
+      onEditLeaderLine: editLeaderLine,
+      onEditAnchor: editTagAnchor,
+      anchorSelectionActive: tagEditor.repositioningAnchor,
+      hasEditedAnchor: tagEditor.hasEditedAnchor,
+      onSave: saveTagEditor
+    });
+    return;
+  }
   if (!tagDraft) {
     host.innerHTML = '';
     return;
   }
+  updateTagDraftNotice();
   renderTagDraftPanel(host, tagDraft, {
     categories: currentCategoryDefinitions(),
     onChange: (changes) => {
       Object.assign(tagDraft, changes);
+      if (tagDraft.brushColorMode !== 'custom') tagDraft.brushColor = tagDraft.brushCategoryColor || categoryBrushColor(tagDraft.category);
+      if (tagDraft.brushMode) {
+        tagDraft.highlight ||= { points: [] };
+        tagDraft.highlight.colorMode = tagDraft.brushColorMode;
+        tagDraft.highlight.color = tagDraft.brushColor;
+        tagDraft.highlight.radius = tagDraft.brushRadius;
+        if (tagDraft.highlight.points.length) annotationManager.showBrushPreview(tagDraft.highlight);
+      } else {
+        delete tagDraft.highlight;
+        annotationManager.hideBrushPreview();
+      }
       saveTagDraft();
       if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
     },
     onResetAnchor: () => {
       tagDraft.position = undefined;
       tagDraft.normal = undefined;
+      delete tagDraft.highlight;
+      annotationManager.hideBrushPreview();
       annotationManager.hidePreview();
       saveTagDraft();
       renderTagDraft();
@@ -1178,10 +1542,28 @@ function renderTagDraft() {
       delete saved.minLineLength;
       delete saved.maxLineLength;
       delete saved.lineStep;
+      delete saved.brushMode;
+      delete saved.brushColor;
+      delete saved.brushColorMode;
+      delete saved.brushCategoryColor;
+      delete saved.brushRadius;
+      delete saved.brushMinRadius;
+      delete saved.brushMaxRadius;
+      delete saved.brushStep;
       closeTagDraft();
       addTag(saved);
     }
-  });
+  }, true);
+}
+
+function updateTagDraftNotice() {
+  if (!tagDraft) {
+    hidePersistentNotice('tag-draft');
+    return;
+  }
+  showPersistentNotice('tag-draft', tagDraft.brushMode
+    ? 'Nový štítek: nastavte údaje v panelu a tažením štětce vyberte plochu na modelu.'
+    : 'Nový štítek: nastavte údaje v panelu, najeďte na povrch a kliknutím vyberte ukotvení.');
 }
 
 function addTag(tag) {
@@ -1200,21 +1582,74 @@ function addTag(tag) {
 }
 
 function editTag(tag) {
-  showTagDialog(tag, {
-    categories: currentCategoryDefinitions(),
-    lineLengthOptions: draftLineLimits(tag.lineLength),
-    onSave: (saved) => {
-      Object.assign(tag, saved);
-      settings.categories.add(tag.category);
-      settings.hiddenTags.delete(tag.id);
-      annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
-      annotationManager.setVisible(settings.categories);
-      annotationManager.select(tag.id, { focus: false });
-      persistModel();
-      renderCurrentSidebar();
-      showToast('Štítek byl uložen.');
+  if (tagDraft) {
+    showToast('Nejdříve dokončete nebo zrušte právě vytvářený štítek.', 'error');
+    return;
+  }
+  const limits = draftLineLimits(tag.lineLength);
+  const sourceStyle = tag.style || tag.highlight;
+  tagEditor = {
+    tag,
+    draft: {
+      title: tag.title || '',
+      category: tag.category || currentCategoryDefinitions()[0]?.id || 'obecne',
+      description: tag.description || '',
+      ...limits,
+      lineLength: tag.lineLength || limits.lineLength,
+      style: {
+        colorMode: sourceStyle?.colorMode === 'custom' ? 'custom' : 'category',
+        color: sourceStyle?.color || categoryBrushColor(tag.category)
+      },
+      highlight: tag.highlight,
+      position: tag.position ? [...tag.position] : undefined,
+      normal: tag.normal ? [...tag.normal] : undefined
     }
+  };
+  annotationManager.select(tag.id, { focus: false });
+  annotationManager.hidePreview();
+  renderTagDraft();
+  renderCurrentSidebar();
+}
+
+function closeTagEditor() {
+  tagEditor = undefined;
+  annotationManager.hidePreview();
+  renderTagDraft();
+  renderCurrentSidebar();
+}
+
+function editTagAnchor() {
+  if (!tagEditor || !settings.canEdit) return;
+  tagEditor.repositioningAnchor = !tagEditor.repositioningAnchor;
+  if (!tagEditor.repositioningAnchor && !tagEditor.hasEditedAnchor) annotationManager.hidePreview();
+  renderTagDraft();
+  showToast(tagEditor.repositioningAnchor
+    ? 'Klikněte na nové místo na povrchu modelu. Pohled se při samotném kliknutí nezmění.'
+    : 'Výběr nového bodu byl zrušen.');
+}
+
+function saveTagEditor() {
+  if (!tagEditor || !tagEditor.draft.title.trim()) return;
+  const { tag, draft } = tagEditor;
+  Object.assign(tag, {
+    title: draft.title.trim(),
+    category: draft.category,
+    description: draft.description,
+    lineLength: draft.lineLength,
+    style: { ...draft.style },
+    ...(draft.position && draft.normal ? { position: [...draft.position], normal: [...draft.normal] } : {})
   });
+  settings.categories.add(tag.category);
+  settings.hiddenTags.delete(tag.id);
+  annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
+  annotationManager.setVisible(settings.categories);
+  annotationManager.select(tag.id, { focus: false });
+  annotationManager.hidePreview();
+  persistModel();
+  tagEditor = undefined;
+  renderTagDraft();
+  renderCurrentSidebar();
+  showToast('Štítek byl uložen.');
 }
 
 function deleteTag(tag) {
@@ -1232,10 +1667,8 @@ function updateWikiSaveControl() {
   if (!button) return;
   const pending = settings.wikiDirty;
   button.disabled = wikiSaveInFlight;
-  button.textContent = wikiSaveInFlight ? 'Ukládání…' : pending ? 'Uložit změny do článku 3D' : 'Uložit do článku 3D';
-  button.title = wikiSaveInFlight
-    ? 'Ukládání změn do definujícího článku 3D probíhá'
-    : pending ? 'V článku 3D čekají neuložené změny' : 'Uložit konfiguraci do definujícího článku 3D';
+  button.innerHTML = `${actionIconMarkup('save')}${wikiSaveInFlight ? 'UKLÁDÁNÍ…' : 'ULOŽIT'}`;
+  button.title = wikiSaveInFlight ? 'Ukládání…' : 'Uložit';
   button.toggleAttribute('data-dirty', pending);
   button.setAttribute('aria-busy', String(wikiSaveInFlight));
 }
@@ -1381,6 +1814,7 @@ function manageCategories({ startAdding = false, selectForDraft = false } = {}) 
 
 function destroyViewer() {
   loadRequestId += 1;
+  hidePersistentNotice('tag-draft');
   annotationManager?.dispose();
   sceneManager?.dispose();
   annotationManager = undefined;

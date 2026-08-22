@@ -1,5 +1,75 @@
 [
   {
+    "id": "lebka",
+    "title": "Lebka",
+    "description": "",
+    "format": "STL",
+    "file": "/storage/models/lebka/easy-to-print-skull-stl.stl",
+    "files": [
+      "/storage/models/lebka/easy-to-print-skull-stl.stl"
+    ],
+    "rawFile": "lebka/easy-to-print-skull-stl.stl",
+    "rawFiles": [
+      "lebka/easy-to-print-skull-stl.stl"
+    ],
+    "variants": {
+      "original": "/storage/models/lebka/easy-to-print-skull-stl.stl",
+      "medium": "/storage/models/lebka/easy-to-print-skull-stl.medium.stl",
+      "small": "/storage/models/lebka/easy-to-print-skull-stl.small.stl"
+    },
+    "rawVariants": {
+      "original": "lebka/easy-to-print-skull-stl.stl",
+      "medium": "lebka/easy-to-print-skull-stl.medium.stl",
+      "small": "lebka/easy-to-print-skull-stl.small.stl"
+    },
+    "variantInfo": {
+      "original": {
+        "bytes": 2979984,
+        "triangles": 59598
+      },
+      "medium": {
+        "bytes": 1339584,
+        "triangles": 26790
+      },
+      "small": {
+        "bytes": 357084,
+        "triangles": 7140
+      }
+    },
+    "thumbnail": "/storage/models/lebka/thumbnail.svg",
+    "rawThumbnail": "lebka/thumbnail.svg",
+    "generation": {
+      "status": "ready"
+    },
+    "license": "Jiná (uveďte v původu)",
+    "author": "",
+    "origin": "jhbk",
+    "sourceUrl": "",
+    "appearance": {
+      "color": "#c7dce9",
+      "sceneBackground": "#f7fafc",
+      "roughness": 0.6,
+      "opacity": 1,
+      "wireframe": false,
+      "clipX": 100,
+      "clipY": 100,
+      "clipZ": 100
+    },
+    "categories": [
+      {
+        "id": "obecne",
+        "name": "Obecné",
+        "description": "",
+        "color": "#2da993"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-08-22T21:26:50.649Z",
+    "wikiArticle": "3D:Lebka",
+    "updatedAt": "2026-08-22T21:26:51.003Z",
+    "thumbnailUpdatedAt": "2026-08-22T21:57:26.987Z"
+  },
+  {
     "id": "scapula",
     "title": "Scapula",
     "description": "Pravá lopatka",
@@ -66,7 +136,8 @@
     "tags": [],
     "createdAt": "2026-07-26T18:20:03.037Z",
     "wikiArticle": "3D:Scapula",
-    "updatedAt": "2026-07-26T18:20:03.161Z"
+    "updatedAt": "2026-07-26T18:20:03.161Z",
+    "thumbnailUpdatedAt": "2026-08-22T21:33:59.846Z"
   },
   {
     "id": "ulna",
@@ -126,6 +197,7 @@
     "tags": [],
     "createdAt": "2026-07-26T17:43:21.083Z",
     "wikiArticle": "3D:Ulna",
-    "updatedAt": "2026-07-26T17:43:21.235Z"
+    "updatedAt": "2026-07-26T17:43:21.235Z",
+    "thumbnailUpdatedAt": "2026-08-22T21:34:02.115Z"
   }
 ]

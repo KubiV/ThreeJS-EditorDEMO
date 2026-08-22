@@ -20,6 +20,26 @@ export async function saveModel(model) {
   }), 'Konfiguraci se nepodařilo uložit.');
 }
 
+export async function fetchModelPermissions({ storageId, article, rawFile } = {}) {
+  const url = storageId
+    ? `/api/models/${encodeURIComponent(storageId)}/permissions`
+    : `/api/models/permissions?article=${encodeURIComponent(article || '')}&file=${encodeURIComponent(rawFile || '')}`;
+  return responseJson(await fetch(url, { cache: 'no-store' }), 'Oprávnění modelu se nepodařilo ověřit.');
+}
+
+export async function regenerateModelThumbnail(modelId, view) {
+  const options = { method: 'POST' };
+  if (view) {
+    options.headers = { 'content-type': 'application/json; charset=utf-8' };
+    options.body = JSON.stringify(view);
+  }
+  return responseJson(await fetch(`/api/models/${encodeURIComponent(modelId)}/thumbnail`, options), 'Náhled modelu se nepodařilo přegenerovat.');
+}
+
+export async function deleteModel(modelId) {
+  return responseJson(await fetch(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' }), 'Model se nepodařilo odstranit.');
+}
+
 export async function fetchWikiModel(article) {
   // A switch from editing to reading must reflect the revision that was just
   // published. Do not reuse a cached model definition with the previous

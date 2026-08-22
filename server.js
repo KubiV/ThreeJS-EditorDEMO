@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MODEL_APPEARANCE, capitalizeTitle, normalizeCategoryDefinitions, normalizeModelAppearance, parseCategoryWikitext, parseModel3dWikitext } from './src/api/model3d-format.js';
-import { createModelArtifacts } from './src/server/model-artifacts.js';
+import { createModelArtifacts, regenerateModelThumbnail } from './src/server/model-artifacts.js';
 import localSettings from './LocalSettings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,22 @@ function normalizeOrigin(value, name) {
   return url.origin;
 }
 
+function accountName(value, name) {
+  const account = settingText(value, name).normalize('NFC');
+  if (!account) throw new Error(`LocalSettings.js: uživatel v „${name}“ nesmí být prázdný.`);
+  return account;
+}
+
+function accountKey(value) {
+  return String(value || '').trim().normalize('NFC').toLocaleLowerCase('cs-CZ');
+}
+
+function configuredAccounts(value, name) {
+  if (value === undefined || value === null) return new Set();
+  if (!Array.isArray(value)) throw new Error(`LocalSettings.js: „${name}“ musí být pole uživatelských jmen MediaWiki.`);
+  return new Set(value.map((user, index) => accountKey(accountName(user, `${name}[${index}]`))));
+}
+
 const serverSettings = settingsObject(localSettings?.server, 'server');
 const storageSettings = settingsObject(localSettings?.storage, 'storage');
 const uploadSettings = settingsObject(localSettings?.upload, 'upload');
@@ -107,6 +123,14 @@ if (securitySettings.trustedOrigins !== undefined && !Array.isArray(securitySett
 }
 const trustedWriteOrigins = new Set((securitySettings.trustedOrigins || []).map((origin, index) => normalizeOrigin(origin, `security.trustedOrigins[${index}]`)));
 const modelAccessSettings = optionalSettingsObject(securitySettings.modelAccess, 'security.modelAccess');
+const modelManagementSettings = optionalSettingsObject(securitySettings.modelManagement, 'security.modelManagement');
+const configuredModelEditors = configuredAccounts(modelManagementSettings.editors, 'security.modelManagement.editors');
+const configuredModelDeleters = configuredAccounts(modelManagementSettings.deleters, 'security.modelManagement.deleters');
+const configuredThumbnailRegenerators = configuredAccounts(modelManagementSettings.thumbnailRegenerators, 'security.modelManagement.thumbnailRegenerators');
+// Keep installations updated from older versions working as before: every
+// authenticated MediaWiki editor may edit a model. An administrator may opt
+// into owner-only edits only after legacy records have an assigned owner.
+const configuredOwnershipEditOnly = booleanSetting(modelManagementSettings.requireOwnershipForEdits, 'security.modelManagement.requireOwnershipForEdits', false);
 if (modelAccessSettings.allowedGroups !== undefined && !Array.isArray(modelAccessSettings.allowedGroups)) {
   throw new Error('LocalSettings.js: „security.modelAccess.allowedGroups“ musí být pole skupin MediaWiki.');
 }
@@ -183,6 +207,42 @@ const writeRegistry = (models) => fs.writeFile(registryPath, `${JSON.stringify(m
 const storageFileUrl = (id, name) => `/storage/models/${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
 const storageRawFile = (id, name) => `${id}/${name}`;
 
+function modelOwnerKey(model) {
+  return accountKey(model?.uploadedBy);
+}
+
+function modelPermissions(user, model) {
+  const userKey = accountKey(user?.name);
+  const isOwner = Boolean(userKey && userKey === modelOwnerKey(model));
+  return {
+    isOwner,
+    canEdit: !configuredOwnershipEditOnly || isOwner || configuredModelEditors.has(userKey),
+    canDelete: configuredModelDeleters.has(userKey),
+    canRegenerateThumbnail: configuredThumbnailRegenerators.has(userKey)
+  };
+}
+
+function requireModelPermission(user, model, operation) {
+  const permissions = modelPermissions(user, model);
+  const allowed = operation === 'edit' ? permissions.canEdit
+    : operation === 'delete' ? permissions.canDelete
+      : operation === 'thumbnail' ? permissions.canRegenerateThumbnail
+        : false;
+  if (allowed) return permissions;
+  const labels = {
+    edit: 'měnit informace o tomto 3D modelu',
+    delete: 'mazat 3D modely',
+    thumbnail: 'přegenerovat náhledové obrázky'
+  };
+  const error = new Error(`Uživatel ${user?.name || 'bez relace'} nemá oprávnění ${labels[operation] || 'provést tuto operaci'}.`);
+  error.status = 403;
+  throw error;
+}
+
+function registryModelById(models, id) {
+  return models.find((model) => model.id === String(id || ''));
+}
+
 function localModelAssetPath(value) {
   const requested = String(value || '');
   const parts = requested.split('/');
@@ -226,6 +286,24 @@ async function sendProtectedModelFile(filePath, res, next, { root = realModelsRo
 
 function cleanText(value, maxLength) {
   return String(value || '').trim().replace(/[\r\n]+/g, ' ').slice(0, maxLength);
+}
+
+function thumbnailViewFromRequest(value) {
+  if (!value?.useCurrentView) return null;
+  const vector = (coordinates, length) => Array.isArray(coordinates)
+    && coordinates.length === length
+    && coordinates.every((coordinate) => Number.isFinite(Number(coordinate)))
+    ? coordinates.map(Number)
+    : null;
+  const position = vector(value.camera?.position, 3);
+  const target = vector(value.camera?.target, 3);
+  const quaternion = vector(value.orientation?.quaternion, 4);
+  if (!position || !target || !quaternion || quaternion.every((coordinate) => coordinate === 0)) {
+    const error = new Error('Aktuální pohled modelu není platný.');
+    error.status = 400;
+    throw error;
+  }
+  return { camera: { position, target }, orientation: { quaternion } };
 }
 
 function duplicateModelTitleError(title) {
@@ -482,6 +560,21 @@ app.get('/api/models', async (_req, res, next) => {
   try { res.json(await readRegistry()); } catch (error) { next(error); }
 });
 
+app.get('/api/models/permissions', requireMediaWikiEditor, async (req, res, next) => {
+  try {
+    const article = String(req.query.article || '').trim();
+    const rawFile = String(req.query.file || '').trim();
+    const model = (await readRegistry()).find((item) => item.wikiArticle === article
+      || item.rawFile === rawFile
+      || item.rawVariants?.original === rawFile);
+    res.json({
+      ...modelPermissions(req.mediaWikiUser, model),
+      ...(model?.id ? { storageId: model.id } : {}),
+      isRegistered: Boolean(model)
+    });
+  } catch (error) { next(error); }
+});
+
 // Only non-secret settings are exposed to the browser, so the same UI works locally and in production.
 app.get('/api/wiki/config', (_req, res) => {
   res.json({
@@ -498,6 +591,9 @@ app.get('/api/wiki/config', (_req, res) => {
       mode: configuredModelAccessMode,
       requireLogin: configuredModelAccessRequireLogin,
       restrictedToGroups: Boolean(configuredModelAccessGroups.size)
+    },
+    modelManagement: {
+      requireOwnershipForEdits: configuredOwnershipEditOnly
     },
     branding: {
       headerText: configuredHeaderText,
@@ -554,6 +650,7 @@ app.post('/api/models', ...protectWrite, receiveModelFiles, async (req, res, nex
       appearance: DEFAULT_MODEL_APPEARANCE,
       categories: normalizeCategoryDefinitions([{ id: 'obecne', name: 'Obecné', description: '' }]),
       tags: [],
+      uploadedBy: req.mediaWikiUser.name,
       createdAt: new Date().toISOString()
     };
     models.unshift(record);
@@ -576,6 +673,7 @@ app.put('/api/models/:id', ...protectWrite, async (req, res, next) => {
     const index = models.findIndex((model) => model.id === req.params.id);
     if (index < 0) return res.status(404).json({ error: 'Model nebyl nalezen.' });
     const current = models[index];
+    requireModelPermission(req.mediaWikiUser, current, 'edit');
     const tags = Array.isArray(req.body.tags) ? req.body.tags.map((tag, tagIndex) => ({
       id: String(tag.id || `tag-${tagIndex + 1}`).slice(0, 100),
       title: String(tag.title || 'Nový štítek').slice(0, 160),
@@ -605,6 +703,77 @@ app.put('/api/models/:id', ...protectWrite, async (req, res, next) => {
     };
     await writeRegistry(models);
     res.json(models[index]);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/models/:id/permissions', requireMediaWikiEditor, async (req, res, next) => {
+  try {
+    const model = registryModelById(await readRegistry(), req.params.id);
+    if (!model) return res.status(404).json({ error: 'Model nebyl nalezen v lokálním úložišti.' });
+    res.json(modelPermissions(req.mediaWikiUser, model));
+  } catch (error) { next(error); }
+});
+
+app.post('/api/models/:id/thumbnail', ...protectWrite, async (req, res, next) => {
+  try {
+    const models = await readRegistry();
+    const index = models.findIndex((model) => model.id === req.params.id);
+    if (index < 0) return res.status(404).json({ error: 'Model nebyl nalezen.' });
+    const current = models[index];
+    requireModelPermission(req.mediaWikiUser, current, 'thumbnail');
+    const originalFile = current.rawVariants?.original || current.rawFile;
+    const sourcePath = localStoredModelPath(originalFile);
+    if (!sourcePath) throw new Error('Původní soubor modelu není v lokálním úložišti dostupný.');
+    const thumbnailName = path.basename(String(current.rawThumbnail || 'thumbnail.svg'));
+    const thumbnailPath = path.join(modelsRoot, current.id, thumbnailName);
+    const temporaryPath = path.join(modelsRoot, current.id, `.thumbnail-${crypto.randomUUID()}.tmp`);
+    let view = thumbnailViewFromRequest(req.body) || {};
+    if (!view.camera && current.wikiArticle) {
+      const wikitext = await readWikiWikitext(current.wikiArticle);
+      if (wikitext === null) throw new Error('Definující článek 3D modelu nebyl nalezen.');
+      const parsed = parseModel3dWikitext(wikitext);
+      view = { camera: parsed.config.camera, orientation: parsed.config.orientation };
+    }
+    try {
+      await regenerateModelThumbnail({ sourcePath, outputPath: temporaryPath, originalFile: path.basename(originalFile), ...view });
+      await fs.rename(temporaryPath, thumbnailPath);
+    } finally {
+      await fs.rm(temporaryPath, { force: true }).catch(() => {});
+    }
+    const thumbnailUpdatedAt = new Date().toISOString();
+    models[index] = { ...current, rawThumbnail: storageRawFile(current.id, thumbnailName), thumbnail: storageFileUrl(current.id, thumbnailName), thumbnailUpdatedAt };
+    await writeRegistry(models);
+    res.json({ thumbnail: `${storageFileUrl(current.id, thumbnailName)}?v=${encodeURIComponent(thumbnailUpdatedAt)}`, thumbnailUpdatedAt });
+  } catch (error) { next(error); }
+});
+
+app.delete('/api/models/:id', ...protectWrite, async (req, res, next) => {
+  try {
+    const models = await readRegistry();
+    const index = models.findIndex((model) => model.id === req.params.id);
+    if (index < 0) return res.status(404).json({ error: 'Model nebyl nalezen.' });
+    const current = models[index];
+    requireModelPermission(req.mediaWikiUser, current, 'delete');
+    if (current.wikiArticle) {
+      if (!req.mediaWikiUser.rights.includes('delete')) {
+        return res.status(403).json({ error: 'Smazání modelu vyžaduje také právo „delete“ v MediaWiki pro odstranění jeho definujícího článku.' });
+      }
+      const apiUrl = validateApiUrl(configuredWikiApiUrl);
+      const csrf = await requestWiki(apiUrl, { action: 'query', meta: 'tokens', format: 'json' }, { cookie: String(req.headers.cookie || '') });
+      await requestWiki(apiUrl, {
+        action: 'delete',
+        title: current.wikiArticle,
+        reason: `Odstranění 3D modelu uživatelem ${req.mediaWikiUser.name}`,
+        token: csrf.data.query?.tokens?.csrftoken,
+        format: 'json'
+      }, { cookie: csrf.cookie });
+    }
+    // The folder name is the registered model id; no user input is used for
+    // the deletion target.
+    await fs.rm(path.join(modelsRoot, current.id), { recursive: true, force: true });
+    models.splice(index, 1);
+    await writeRegistry(models);
+    res.json({ deleted: true, id: current.id });
   } catch (error) { next(error); }
 });
 
@@ -734,8 +903,13 @@ async function wikiModelRecord(article, suppliedWikitext) {
   const rawVariants = parsed.config.variants;
   const variantInfo = await localVariantInfo(rawVariants);
   const rawFiles = [...new Set([parsed.file, ...parsed.config.files, ...Object.values(rawVariants)])];
+  const registryModels = await readRegistry();
+  const registryModel = registryModels.find((model) => model.wikiArticle === article
+    || model.rawFile === parsed.file
+    || model.rawVariants?.original === parsed.file);
   const titleWithoutNamespace = article.includes(':') ? article.slice(article.indexOf(':') + 1) : article;
   const primaryFile = resolveStoredModelFile(parsed.file);
+  const thumbnailVersion = registryModel?.thumbnailUpdatedAt;
   return {
     id: `wiki-${cleanId(article)}`,
     source: 'wiki',
@@ -749,8 +923,13 @@ async function wikiModelRecord(article, suppliedWikitext) {
     rawFiles,
     ...(Object.keys(rawVariants).length ? { variants: Object.fromEntries(Object.entries(rawVariants).map(([key, file]) => [key, resolveStoredModelFile(file)])), rawVariants } : {}),
     ...(Object.keys(variantInfo).length ? { variantInfo } : {}),
-    ...(parsed.config.thumbnail ? { thumbnail: resolveStoredModelFile(parsed.config.thumbnail), rawThumbnail: parsed.config.thumbnail } : {}),
+    ...(parsed.config.thumbnail ? {
+      thumbnail: `${resolveStoredModelFile(parsed.config.thumbnail)}${thumbnailVersion ? `?v=${encodeURIComponent(thumbnailVersion)}` : ''}`,
+      rawThumbnail: parsed.config.thumbnail
+    } : {}),
     ...parsed.config.metadata,
+    ...(parsed.config.uploadedBy || registryModel?.uploadedBy ? { uploadedBy: parsed.config.uploadedBy || registryModel?.uploadedBy } : {}),
+    ...(registryModel?.id ? { storageId: registryModel.id } : {}),
     appearance: parsed.config.appearance,
     categories: parsed.config.categories,
     tags: parsed.config.tags,
@@ -1075,6 +1254,28 @@ async function requestWiki(url, body, { cookie = '', authorization = '' } = {}) 
   return { data, cookie: cookies.filter(Boolean).map((item) => item.split(';')[0]).join('; ') || cookie };
 }
 
+async function authorizeModelPublication(user, title, text) {
+  if (title === configuredCategoryPage) return;
+  const parsed = parseModel3dWikitext(text);
+  const models = await readRegistry();
+  const model = models.find((item) => item.wikiArticle === title
+    || item.rawFile === parsed.file
+    || item.rawVariants?.original === parsed.file
+    || (cleanId(item.title) === cleanId(parsed.config.title) && item.id === cleanId(parsed.config.title)));
+  if (!model) {
+    if (!configuredOwnershipEditOnly || configuredModelEditors.has(accountKey(user?.name))) return;
+    const error = new Error('Úpravy jsou povoleny jen pro 3D modely nahrané tímto prohlížečem.');
+    error.status = 403;
+    throw error;
+  }
+  requireModelPermission(user, model, 'edit');
+  if (parsed.config.uploadedBy && model.uploadedBy && accountKey(parsed.config.uploadedBy) !== modelOwnerKey(model)) {
+    const error = new Error('Vlastníka nahraného modelu nelze změnit v definici článku.');
+    error.status = 400;
+    throw error;
+  }
+}
+
 /**
  * Same-origin bridge for a user's existing MediaWiki session. Cookies are
  * host-scoped (not port-scoped), so this makes localhost:3000 -> localhost:8000
@@ -1087,8 +1288,7 @@ app.post('/api/wiki/session', requireTrustedWriteOrigin, async (req, res, next) 
     const action = String(body.action || '');
     const isUserInfo = action === 'query' && body.meta === 'userinfo';
     const isCsrfToken = action === 'query' && body.meta === 'tokens';
-    const isEdit = action === 'edit' && body.title && body.text && body.token;
-    if (!isUserInfo && !isCsrfToken && !isEdit) return res.status(400).json({ error: 'Nepovolený požadavek uživatelské MediaWiki relace.' });
+    if (!isUserInfo && !isCsrfToken) return res.status(400).json({ error: 'Nepovolený požadavek uživatelské MediaWiki relace.' });
     const apiTarget = configuredWikiApiUrl;
     if (!apiTarget) return res.status(503).json({ error: 'Na serveru není nastavena adresa MediaWiki API.' });
     const result = await requestWiki(validateApiUrl(apiTarget), body, { cookie: String(req.headers.cookie || '') });
@@ -1098,28 +1298,24 @@ app.post('/api/wiki/session', requireTrustedWriteOrigin, async (req, res, next) 
 
 app.post('/api/wiki/publish', ...protectWrite, async (req, res, next) => {
   try {
-    const { title: requestedTitle, text, summary = 'Aktualizace 3D modelu z 3D editoru', oauthToken } = req.body;
+    const { title: requestedTitle, text, summary = 'Aktualizace 3D modelu z 3D editoru', createOnly = false } = req.body;
     if (!configuredWikiApiUrl || !requestedTitle || !text) return res.status(400).json({ error: 'Chybí nastavená URL API, název stránky nebo obsah.' });
     const apiUrl = validateApiUrl(configuredWikiApiUrl);
     if (req.body.endpoint && validateApiUrl(req.body.endpoint) !== apiUrl) {
       return res.status(403).json({ error: 'Server může publikovat pouze do nakonfigurované MediaWiki.' });
     }
     const title = qualifyWikiTitle(requestedTitle);
-    if (oauthToken) {
-      const authorization = `Bearer ${oauthToken}`;
-      const tokenResponse = await requestWiki(apiUrl, { action: 'query', meta: 'tokens', format: 'json' }, { authorization });
-      const edited = await requestWiki(apiUrl, {
-        action: 'edit', title, text, summary, token: tokenResponse.data.query.tokens.csrftoken, format: 'json'
-      }, { authorization });
-      return res.json({ ...edited.data, publishedTitle: title });
-    }
-    if (!configuredBotUsername || !configuredBotPassword) return res.status(422).json({ error: 'Na serveru nejsou nastaveny údaje bota ani OAuth token.' });
-    let result = await requestWiki(apiUrl, { action: 'query', meta: 'tokens', type: 'login', format: 'json' });
-    result = await requestWiki(apiUrl, { action: 'login', lgname: configuredBotUsername, lgpassword: configuredBotPassword, lgtoken: result.data.query.tokens.logintoken, format: 'json' }, { cookie: result.cookie });
-    if (result.data.login?.result !== 'Success') throw new Error(result.data.login?.reason || 'Přihlášení MediaWiki bota selhalo.');
-    const csrf = await requestWiki(apiUrl, { action: 'query', meta: 'tokens', format: 'json' }, { cookie: result.cookie });
-    const edited = await requestWiki(apiUrl, { action: 'edit', title, text, summary, token: csrf.data.query.tokens.csrftoken, format: 'json' }, { cookie: csrf.cookie });
-    res.json({ ...edited.data, publishedTitle: title });
+    await authorizeModelPublication(req.mediaWikiUser, title, text);
+    // Publish through the authenticated visitor's own MediaWiki session. This
+    // preserves the author in page history and keeps the permission check on
+    // this server authoritative; a configured bot is not needed for edits.
+    const sessionCookie = String(req.headers.cookie || '');
+    const csrf = await requestWiki(apiUrl, { action: 'query', meta: 'tokens', format: 'json' }, { cookie: sessionCookie });
+    const edited = await requestWiki(apiUrl, {
+      action: 'edit', title, text, summary, token: csrf.data.query.tokens.csrftoken, format: 'json',
+      ...(createOnly ? { createonly: '1' } : {})
+    }, { cookie: csrf.cookie });
+    res.json({ ...edited.data, publishedTitle: title, user: req.mediaWikiUser });
   } catch (error) { next(error); }
 });
 

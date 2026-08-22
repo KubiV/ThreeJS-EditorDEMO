@@ -1,11 +1,11 @@
-import { brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
+import { actionIconMarkup, brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
 
 export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = null, wikiSessionUserUrl = '', wikiSessionLoginUrl = '' }) {
   host.innerHTML = `
     <main class="wiki-shell about-page">
       <header class="wiki-topbar">
         ${brandMarkup({ interactive: true })}
-        <nav class="topbar-actions"><button type="button" class="topbar-link" data-action="home">← Zpět k modelům</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav>
+        <nav class="topbar-actions"><button type="button" class="topbar-link" data-action="home">${actionIconMarkup('back')}Zpět k modelům</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiSessionUserUrl, loginUrl: wikiSessionLoginUrl })}</nav>
       </header>
       <div class="wiki-page-layout">
         <article class="about-content">
@@ -36,11 +36,14 @@ export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = nu
               <pre><code>{{3D prohlížeč|model=3D:Název modelu|výška=620|varianta=střední|načíst po kliknutí=ne}}</code></pre>
               <p>Pokud má článek obsahovat jen odkaz, použijte:</p>
               <pre><code>{{3D odkaz|model=3D:Název modelu}}</code></pre>
+              <p>Výchozí text odkazu je „Otevřít interaktivní 3D prohlížeč“. Vlastní text nastavíte parametrem <code>text</code>:</p>
+              <pre><code>{{3D odkaz|model=3D:Název modelu|text=Prohlédnout model}}</code></pre>
+              <p>Text i ikona 3D krychle za ním tvoří jeden odkaz, který se otevře v novém okně.</p>
               <p>Úplný přehled parametrů je ve wiki na podstránkách <code>Šablona:3D prohlížeč/dokumentace</code> a <code>Šablona:3D odkaz/dokumentace</code>.</p>
             </section>
           </div>
 
-          <div class="about-actions"><button type="button" class="button button-primary" data-action="home">Zobrazit 3D modely</button></div>
+          <div class="about-actions"><button type="button" class="button button-primary" data-action="home">${actionIconMarkup('open')}Zobrazit 3D modely</button></div>
         </article>
       </div>
     </main>`;

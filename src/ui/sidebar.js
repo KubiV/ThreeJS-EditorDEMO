@@ -1,5 +1,6 @@
 import { categoryColor, capitalizeTitle, normalizeCategoryDefinitions } from '../api/model3d-format.js';
 import { escapeHtml, renderWikitext } from '../annotations/wikitext.js';
+import { actionIconMarkup } from './brand.js';
 
 export const DEFAULT_CATEGORIES = [{ id: 'obecne', name: 'Obecné', description: '' }];
 
@@ -79,7 +80,7 @@ function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, act
     <aside class="embed-sidebar" aria-label="Popisky modelu">
       <p class="eyebrow">3D POPISKY</p>
       ${categoryFilters ? `<fieldset class="embed-category-filters"><legend>Kategorie</legend><div>${categoryFilters}</div></fieldset>` : ''}
-      <div class="embed-panel-switch" role="group" aria-label="Obsah pravého panelu"><button type="button" data-embedded-mode="list" class="${panelMode === 'list' ? 'is-active' : ''}" aria-pressed="${panelMode === 'list'}">Seznam štítků</button><button type="button" data-embedded-mode="detail" class="${panelMode === 'detail' ? 'is-active' : ''}" aria-pressed="${panelMode === 'detail'}">Popisek štítku</button></div>
+      <div class="embed-panel-switch" role="group" aria-label="Obsah pravého panelu"><button type="button" data-embedded-mode="list" class="${panelMode === 'list' ? 'is-active' : ''}" aria-pressed="${panelMode === 'list'}">${actionIconMarkup('list')}Seznam štítků</button><button type="button" data-embedded-mode="detail" class="${panelMode === 'detail' ? 'is-active' : ''}" aria-pressed="${panelMode === 'detail'}">${actionIconMarkup('info')}Popisek štítku</button></div>
       ${panelContent}
     </aside>`;
   host.querySelectorAll('[data-tag]').forEach((button) => button.addEventListener('click', () => actions.select(button.dataset.tag)));
@@ -93,6 +94,10 @@ function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, act
 
 export function renderSidebar(host, model, selectedTag, state, actions) {
   const collapsed = host.classList.contains('is-collapsed');
+  // Re-rendering the sidebar replaces every <details> element, which would
+  // otherwise reset the user's expanded sections back to their default state.
+  const openPanelIds = new Set([...host.querySelectorAll('details.collapsible-section[open] > summary[data-panel-id]')]
+    .map((summary) => summary.dataset.panelId));
   const definitions = categoryDefinitions(state.categoryDefinitions, model.tags);
   if (state.embedded) {
     renderEmbeddedSidebar(host, model, selectedTag, definitions, state, actions);
@@ -104,9 +109,10 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
   const editable = Boolean(state.canEdit);
   const tagList = (model.tags || []).map((tag) => {
     const category = categoryById.get(tag.category);
-    const color = category?.color || categoryColor(categoryName(tag.category, definitions));
+    const categoryColorValue = category?.color || categoryColor(categoryName(tag.category, definitions));
+    const color = (tag.style || tag.highlight)?.colorMode === 'custom' ? (tag.style || tag.highlight).color : categoryColorValue;
     const hidden = state.hiddenTags?.has(tag.id);
-    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}</small></span></button><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${hidden ? 'Zobrazit' : 'Skrýt'}</button></div>`;
+    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}${tag.highlight ? '<em class="surface-tag-badge">Plocha</em>' : ''}</small></span></button><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${actionIconMarkup(hidden ? 'eye' : 'eyeOff')}${hidden ? 'Zobrazit' : 'Skrýt'}</button></div>`;
   }).join('');
   const smallInfo = model.variantInfo?.small || model.variantInfo?.low;
   const mediumInfo = model.variantInfo?.medium;
@@ -119,45 +125,53 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
     const details = [bytesLabel(info?.bytes), Number.isFinite(Number(info?.triangles)) ? `${Number(info.triangles).toLocaleString('cs-CZ')} trojúhelníků` : ''].filter(Boolean).join(' · ');
     return `<div><b>${label}</b><span>${details || 'Velikost souboru není k dispozici'}</span></div>`;
   };
-  const variantSummary = generatedVariants ? `<details class="model-variants"><summary>Varianty modelu jsou připraveny</summary><p class="setting-note">Pro rychlé načtení jsou k dispozici S, M a originál.</p><div class="variant-list">${variantRow('Malá (S)', smallInfo)}${variantRow('Střední (M)', mediumInfo)}${variantRow('Originál', originalInfo)}</div></details>` : '';
+  const collapsibleHeading = (id, title, status = '') => `<summary class="panel-heading collapsible-heading" data-panel-id="${id}"><strong>${title}</strong>${status ? `<span class="advanced-badge">${escapeHtml(status)}</span>` : ''}</summary>`;
+  const variantDetails = generatedVariants ? `<div class="technical-variants"><p class="technical-variants-heading">Varianty modelu jsou připraveny</p><p class="setting-note">Pro rychlé načtení jsou k dispozici S, M a originál.</p><div class="variant-list">${variantRow('Malá (S)', smallInfo)}${variantRow('Střední (M)', mediumInfo)}${variantRow('Originál', originalInfo)}</div></div>` : '';
   const sourceUrl = safeLink(model.sourceUrl);
   const provenance = [model.license, model.author, model.origin].filter(Boolean);
   const provenanceCard = provenance.length || sourceUrl ? `<section class="provenance-card"><p class="eyebrow">PŮVOD A LICENCE</p>${model.license ? `<b>${escapeHtml(model.license)}</b>` : ''}${model.author ? `<span>${escapeHtml(model.author)}</span>` : ''}${model.origin ? `<span>${escapeHtml(model.origin)}</span>` : ''}${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Zdroj modelu ↗</a>` : ''}</section>` : '';
   const loadedObjects = state.loadedObjects?.length ? state.loadedObjects : [model.file ? model.file.split('/').pop() : 'Zatím bez modelu'];
   const isAdvanced = state.interfaceMode === 'advanced';
-  const loadingInfo = isAdvanced ? `<section class="panel-section advanced-section loading-info"><div class="panel-heading"><h2>Stav modelu</h2></div><p class="loading-status"><span class="status-dot" aria-hidden="true"></span><span id="loading-status" role="status">${escapeHtml(state.loadingStatus || 'Připravuji pracovní plochu…')}</span></p></section>` : '';
   const definitionUrl = safeLink(state.wikiDefinitionUrl);
-  const technicalInfo = isAdvanced ? `<details class="panel-section technical-info"><summary>Technické informace</summary><p>Načtená varianta: <b>${state.lod === 'small' ? 'Malá (S)' : state.lod === 'medium' ? 'Střední (M)' : 'Originál'}</b></p>${model.generation?.status ? `<p>Generování variant: <b>${escapeHtml(model.generation.status)}</b></p>` : ''}${definitionUrl ? `<p class="model-definition-link">Článek: <a href="${escapeHtml(definitionUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(model.article || '3D')} ↗</a></p>` : ''}<div class="loaded-model">${loadedObjects.map((name) => `<div><span class="format format-${escapeHtml(model.format || 'glb').toLowerCase()}">.${escapeHtml(model.format || 'GLB').toLowerCase()}</span><span>${escapeHtml(name)}</span></div>`).join('')}</div></details>` : '';
+  const technicalInfo = isAdvanced ? `<details class="panel-section technical-info collapsible-section">${collapsibleHeading('technical-info', 'Technické informace')}<p>Načtená varianta: <b>${state.lod === 'small' ? 'Malá (S)' : state.lod === 'medium' ? 'Střední (M)' : 'Originál'}</b></p>${model.generation?.status ? `<p>Generování variant: <b>${escapeHtml(model.generation.status)}</b></p>` : ''}${variantDetails}${definitionUrl ? `<p class="model-definition-link">Článek: <a href="${escapeHtml(definitionUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(model.article || '3D')} ↗</a></p>` : ''}<div class="loaded-model">${loadedObjects.map((name) => `<div><span class="format format-${escapeHtml(model.format || 'glb').toLowerCase()}">.${escapeHtml(model.format || 'GLB').toLowerCase()}</span><span>${escapeHtml(name)}</span></div>`).join('')}</div></details>` : '';
+  const permissions = state.modelPermissions || {};
+  const canEditInfo = editable || permissions.canEdit;
+  const managementPanel = isAdvanced && editable && (canEditInfo || permissions.canRegenerateThumbnail || permissions.canDelete) ? `
+    <details class="panel-section model-management collapsible-section">${collapsibleHeading('model-management', 'Správa nahraného modelu')}
+      ${canEditInfo ? `<button type="button" class="small-button" data-action="edit-model-info">${actionIconMarkup('edit')}Upravit informace</button><p class="setting-note">Název, popis, licenci, autora, původ a zdroj upravíte v samostatném okně.</p>` : ''}
+      ${permissions.canRegenerateThumbnail ? `<button type="button" class="small-button" data-action="regenerate-thumbnail-current" ${state.modelReady ? '' : 'disabled'}>${actionIconMarkup('refresh')}Náhled z aktuální polohy</button><p class="setting-note">Vytvoří náhled z právě nastavené kamery a natočení modelu; výchozí pohled nemusíte ukládat.</p><button type="button" class="small-button" data-action="regenerate-thumbnail" ${state.wikiDirty ? 'disabled' : ''}>${actionIconMarkup('refresh')}Přegenerovat náhled</button><p class="setting-note">Náhled se vytvoří z uloženého výchozího pohledu a natočení. ${state.wikiDirty ? 'Nejprve uložte změny do článku 3D.' : ''}</p>` : ''}
+      ${permissions.canDelete ? `<button type="button" class="small-button small-button-danger" data-action="delete-model">${actionIconMarkup('delete')}Odstranit model</button><p class="setting-note">Odstraní soubory modelu i jeho definující článek 3D.</p>` : ''}
+    </details>` : '';
   const hasCustomDefaultView = Boolean(model.camera?.position && model.camera?.target);
   const defaultViewStatus = state.defaultViewDirty
-    ? `${hasCustomDefaultView ? 'Vlastní' : 'Automatický'} · čeká na uložení`
-    : hasCustomDefaultView ? 'Vlastní' : 'Automatický';
+    ? 'Čeká na uložení'
+    : hasCustomDefaultView ? 'Nastaveno' : 'Automatický';
   const defaultViewDisabled = state.modelReady ? '' : 'disabled';
   const defaultViewSaveDisabled = editable && state.modelReady ? '' : 'disabled';
   const defaultViewGuidance = editable
-    ? `<ol class="default-view-steps"><li>${state.modelReady ? 'Nastavte si model myší.' : 'Počkejte na dokončení načítání modelu.'}</li><li>Klikněte na „Nastavit aktuální pohled“.</li><li>Klikněte nahoře na „Uložit do článku 3D“.</li></ol>`
+    ? `<ol class="default-view-steps"><li>${state.modelReady ? 'Nastavte si model myší.' : 'Počkejte na dokončení načítání modelu.'}</li><li>Klikněte na „Nastavit aktuální pohled“.</li><li>Klikněte nahoře na „ULOŽIT“.</li></ol>`
     : '<p class="setting-note">Dočasné otočení tělesa při prohlížení nemění jeho definici. Pro uložení výchozího natočení se přepněte do režimu Úpravy.</p>';
   const defaultViewPanel = isAdvanced ? `
-    <section class="panel-section default-view-section"><div class="panel-heading"><h2>Výchozí pohled</h2><span class="advanced-badge">${defaultViewStatus}</span></div>
+    <details class="panel-section default-view-section collapsible-section">${collapsibleHeading('default-view', 'Výchozí pohled', defaultViewStatus)}
       <p class="setting-note">${hasCustomDefaultView ? 'Při otevření se použije vlastní poloha kamery uložená v definici tohoto 3D modelu.' : 'Při otevření se model automaticky zobrazí celý.'}</p>
-      <div class="default-view-actions"><button type="button" class="small-button" data-action="fit-model" ${defaultViewDisabled}>Zobrazit celý model</button>${editable ? `<button type="button" class="small-button small-button-primary" data-action="save-default-view" ${defaultViewSaveDisabled}>Nastavit aktuální pohled</button>` : ''}${hasCustomDefaultView && editable ? `<button type="button" class="small-button" data-action="clear-default-view" ${defaultViewSaveDisabled}>Vrátit automatický pohled</button>` : ''}</div>
-      ${state.defaultViewDirty ? '<p class="default-view-pending" role="status">Aktuální pohled je vybrán. Dokončete změnu tlačítkem „Uložit do článku 3D“ v horní liště.</p>' : ''}
+      <div class="default-view-actions"><button type="button" class="small-button" data-action="fit-model" ${defaultViewDisabled}>${actionIconMarkup('fit')}Zobrazit celý model</button>${editable ? `<button type="button" class="small-button small-button-primary" data-action="save-default-view" ${defaultViewSaveDisabled}>${actionIconMarkup('camera')}Nastavit aktuální pohled</button>` : ''}${hasCustomDefaultView && editable ? `<button type="button" class="small-button" data-action="clear-default-view" ${defaultViewSaveDisabled}>${actionIconMarkup('refresh')}Vrátit automatický pohled</button>` : ''}</div>
+      ${state.defaultViewDirty ? '<p class="default-view-pending" role="status">Aktuální pohled je vybrán. Dokončete změnu tlačítkem „ULOŽIT“ v horní liště.</p>' : ''}
       ${defaultViewGuidance}
-    </section>` : '';
+    </details>` : '';
   const hasCustomOrientation = Boolean(model.orientation?.quaternion?.length === 4);
   const orientationStatus = state.defaultOrientationDirty
-    ? `${hasCustomOrientation ? 'Vlastní' : 'Výchozí'} · čeká na uložení`
-    : hasCustomOrientation ? 'Vlastní' : 'Výchozí';
+    ? 'Čeká na uložení'
+    : hasCustomOrientation ? 'Nastaveno' : 'Výchozí';
   const orientationDisabled = editable && state.modelReady ? '' : 'disabled';
   const orientationPanel = isAdvanced ? `
-    <section class="panel-section default-view-section object-orientation-section"><div class="panel-heading"><h2>Výchozí natočení tělesa</h2><span class="advanced-badge">${orientationStatus}</span></div>
+    <details class="panel-section default-view-section object-orientation-section collapsible-section">${collapsibleHeading('default-orientation', 'Výchozí natočení tělesa', orientationStatus)}
       <p class="setting-note">Natočení patří přímo k tělesu, ne ke kameře. Pomocí barevných kruhů otáčejte kolem světových os X, Y a Z.</p>
-      ${editable ? `<div class="default-view-actions"><button type="button" class="small-button small-button-primary" data-action="toggle-rotation-gizmo" ${orientationDisabled}>${state.rotationGizmoVisible ? 'Skrýt kruhy otáčení' : 'Upravit natočení kruhy'}</button><button type="button" class="small-button" data-action="save-default-orientation" ${orientationDisabled}>Uložit aktuální natočení</button>${hasCustomOrientation ? `<button type="button" class="small-button" data-action="clear-default-orientation" ${orientationDisabled}>Vrátit výchozí natočení</button>` : ''}</div>` : '<p class="setting-note">Pro změnu výchozího natočení se přepněte do režimu Úpravy.</p>'}
+      ${editable ? `<div class="default-view-actions"><button type="button" class="small-button small-button-primary" data-action="toggle-rotation-gizmo" ${orientationDisabled}>${actionIconMarkup('rotate')}${state.rotationGizmoVisible ? 'Skrýt kruhy otáčení' : 'Upravit natočení kruhy'}</button><button type="button" class="small-button" data-action="save-default-orientation" ${orientationDisabled}>${actionIconMarkup('save')}Uložit aktuální natočení</button>${hasCustomOrientation ? `<button type="button" class="small-button" data-action="clear-default-orientation" ${orientationDisabled}>${actionIconMarkup('refresh')}Vrátit výchozí natočení</button>` : ''}</div>` : '<p class="setting-note">Pro změnu výchozího natočení se přepněte do režimu Úpravy.</p>'}
       ${state.rotationGizmoVisible ? '<p class="default-view-pending" role="status">Kruhy jsou aktivní. Tažením za červený, zelený nebo modrý kruh natočíte těleso.</p>' : ''}
-      ${state.defaultOrientationDirty ? '<p class="default-view-pending" role="status">Natočení je připraveno. Dokončete změnu tlačítkem „Uložit změny do článku 3D“ v horní liště.</p>' : ''}
-    </section>` : '';
+      ${state.defaultOrientationDirty ? '<p class="default-view-pending" role="status">Natočení je připraveno. Dokončete změnu tlačítkem „ULOŽIT“ v horní liště.</p>' : ''}
+    </details>` : '';
   const appearancePanel = isAdvanced ? `
-    <section class="panel-section model-appearance is-advanced"><div class="panel-heading"><h2>Vzhled modelu</h2></div><div class="settings appearance-settings">
+    <details class="panel-section model-appearance is-advanced collapsible-section">${collapsibleHeading('model-appearance', 'Vzhled modelu')}<div class="settings appearance-settings">
       <label>Barva modelu<input type="color" data-appearance="color" value="${escapeHtml(appearance.color)}" ${appearanceDisabled}></label>
       <label>Barva pozadí scény<input type="color" data-appearance="sceneBackground" value="${escapeHtml(appearance.sceneBackground)}" ${appearanceDisabled}></label>
       <label>Drátěný model<input type="checkbox" data-appearance="wireframe" ${appearance.wireframe ? 'checked' : ''} ${appearanceDisabled}></label>
@@ -166,26 +180,31 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
       <label>Průřez (osa X)<input type="range" data-appearance="clipX" min="-100" max="100" value="${appearance.clipX}" ${appearanceDisabled}></label>
       <label>Průřez (osa Y)<input type="range" data-appearance="clipY" min="-100" max="100" value="${appearance.clipY}" ${appearanceDisabled}></label>
       <label>Průřez (osa Z)<input type="range" data-appearance="clipZ" min="-100" max="100" value="${appearance.clipZ}" ${appearanceDisabled}></label>
-    </div><p class="setting-note">${editable ? 'Změny uložíte do článku 3D modelu tlačítkem „Uložit změny“.' : 'Vzhled lze upravit po přepnutí na Úpravy.'}</p></section>` : '';
+    </div><p class="setting-note">${editable ? 'Změny uložíte tlačítkem „ULOŽIT“ v horní liště.' : 'Vzhled lze upravit po přepnutí na Úpravy.'}</p></details>` : '';
   const categoryFilters = categories.map((id) => {
     const category = categoryById.get(id);
     const color = category?.color || categoryColor(category?.name || id);
     return `<label title="${escapeHtml(category?.description || '')}"><input type="checkbox" data-category="${escapeHtml(id)}" aria-label="Zobrazit kategorii ${escapeHtml(category?.name || id)}" ${state.categories.has(id) ? 'checked' : ''}><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}</label>`;
   }).join('');
-
   host.innerHTML = `
     <aside class="sidebar ${collapsed ? 'is-collapsed' : ''}">
       <div class="sidebar-top"><button class="icon-button" data-action="back" title="Zpět na 3D rozcestník" aria-label="Zpět na 3D rozcestník">←</button><div><strong>${escapeHtml(model.title)}</strong><small>${escapeHtml(model.article || '3D model')}</small></div><button class="icon-button sidebar-toggle" data-action="collapse" title="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}" aria-label="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}">${collapsed ? '⌄' : '⌃'}</button></div>
       <div class="sidebar-scroll">
-        <section class="panel-section tag-section"><div class="panel-heading"><h2>Štítky a popisky</h2><span>${model.tags?.length || 0}</span></div>${editable && !state.tagDraftActive ? '<button type="button" class="tag-draft-launcher" data-action="add-tag">＋ Přidat štítek</button>' : ''}<div class="tag-tools"><button class="small-button" data-action="show-all">Zobrazit vše</button><button class="small-button" data-action="hide-all">Skrýt vše</button>${editable ? '<button class="small-button" data-action="add-category">＋ Kategorie</button><button class="small-button" data-action="manage-categories">Správa</button>' : ''}</div>
+        <section class="panel-section tag-section"><div class="panel-heading"><h2>Štítky a popisky</h2><span>${model.tags?.length || 0}</span></div>${editable && !state.tagDraftActive ? `<button type="button" class="tag-draft-launcher" data-action="add-tag">${actionIconMarkup('add')}Přidat štítek</button>` : ''}<div class="tag-tools"><button class="small-button" data-action="show-all">${actionIconMarkup('eye')}Zobrazit vše</button><button class="small-button" data-action="hide-all">${actionIconMarkup('eyeOff')}Skrýt vše</button>${editable ? `<button class="small-button" data-action="add-category">${actionIconMarkup('add')}Kategorie</button><button class="small-button" data-action="manage-categories">${actionIconMarkup('edit')}Správa</button>` : ''}</div>
         ${categoryFilters ? `<p class="tag-visibility-heading">Zobrazení podle kategorií</p><div class="category-filters">${categoryFilters}</div>` : ''}
         <div class="tag-list">${tagList || '<p class="empty-note">Zatím nejsou vloženy žádné štítky.</p>'}</div></section>
-        <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><h2>${escapeHtml(selectedTag.title)}</h2>${editable ? '<div class="description-actions"><button class="small-button" data-action="edit-tag">Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">Odstranit</button></div>' : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
+        <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><h2>${escapeHtml(selectedTag.title)}</h2>${editable ? `<div class="description-actions"><button class="small-button" data-action="edit-tag">${actionIconMarkup('edit')}Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">${actionIconMarkup('delete')}Odstranit</button></div>` : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
         ${appearancePanel}
-        ${isAdvanced ? `${defaultViewPanel}${orientationPanel}${loadingInfo}${variantSummary}${technicalInfo}${provenanceCard}` : ''}
+        ${isAdvanced ? `${defaultViewPanel}${orientationPanel}${technicalInfo}` : ''}
+        ${managementPanel}
+        ${isAdvanced ? provenanceCard : ''}
       </div>
-      <div class="sidebar-bottom${canRequestOriginal ? '' : ' sidebar-bottom-single'}">${canRequestOriginal ? '<button class="button button-primary" data-action="load-original" title="Načíst původní variantu modelu v plné kvalitě">Originální rozlišení modelu</button>' : ''}<button class="button button-secondary" data-action="reset">Resetovat pohled</button></div>
+      <div class="sidebar-bottom${canRequestOriginal ? '' : ' sidebar-bottom-single'}">${canRequestOriginal ? `<button class="button button-primary" data-action="load-original" title="Načíst původní variantu modelu v plné kvalitě">${actionIconMarkup('upload')}Originální rozlišení modelu</button>` : ''}<button class="button button-secondary" data-action="reset">${actionIconMarkup('refresh')}Resetovat pohled</button></div>
     </aside>`;
+
+  host.querySelectorAll('summary[data-panel-id]').forEach((summary) => {
+    summary.parentElement.open = openPanelIds.has(summary.dataset.panelId);
+  });
 
   host.querySelectorAll('[data-tag]').forEach((button) => button.addEventListener('click', () => actions.select(button.dataset.tag)));
   host.querySelectorAll('[data-toggle-tag]').forEach((button) => button.addEventListener('click', () => actions.toggleTag(button.dataset.toggleTag)));

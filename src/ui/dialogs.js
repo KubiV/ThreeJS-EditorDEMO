@@ -2,10 +2,66 @@ import { escapeHtml } from '../annotations/wikitext.js';
 import { DEFAULT_CATEGORIES } from './sidebar.js';
 import { categoryColor, normalizeCategoryDefinitions, normalizeCategoryId } from '../api/model3d-format.js';
 import { formatLineLength, lineLengthControlMarkup, lineLengthControlValues } from './line-length-control.js';
+import { actionIconMarkup } from './brand.js';
 
-export function showTagDialog(tag, { onSave, categories = DEFAULT_CATEGORIES, lineLengthOptions = {} }) {
+/** Opens the shared metadata editor used from both the hub and the viewer. */
+export function showModelInfoDialog(model, { onSave } = {}) {
+  const draft = {
+    title: '', description: '', license: '', author: '', origin: '', sourceUrl: '',
+    ...model
+  };
+  const licenseOptions = [
+    '', 'CC BY 4.0', 'CC BY-SA 4.0', 'CC0 1.0', 'Public domain',
+    'Vlastní licence / práva vyhrazena', 'Jiná (uveďte v původu)'
+  ];
+  if (draft.license && !licenseOptions.includes(draft.license)) licenseOptions.push(draft.license);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'modal model-info-modal';
+  dialog.innerHTML = `
+    <form method="dialog">
+      <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+      <h2>Upravit informace o modelu</h2>
+      <p>Tyto údaje se uloží do definujícího článku 3D modelu.</p>
+      <label>Název modelu<input name="title" required maxlength="120" value="${escapeHtml(draft.title)}"></label>
+      <label>Popis<textarea name="description" rows="4" maxlength="20000">${escapeHtml(draft.description)}</textarea></label>
+      <label>Licence<select name="license">${licenseOptions.map((license) => `<option value="${escapeHtml(license)}" ${draft.license === license ? 'selected' : ''}>${escapeHtml(license || 'Vyberte licenci…')}</option>`).join('')}</select></label>
+      <label>Autor / držitel práv<input name="author" maxlength="160" value="${escapeHtml(draft.author)}"></label>
+      <label>Původ modelu<input name="origin" maxlength="300" value="${escapeHtml(draft.origin)}"></label>
+      <label>Zdrojový odkaz<input name="sourceUrl" type="url" maxlength="1000" value="${escapeHtml(draft.sourceUrl)}"></label>
+      <div class="form-actions"><button type="button" data-close class="button button-secondary">${actionIconMarkup('cancel')}Zrušit</button><button class="button button-primary" type="submit">${actionIconMarkup('save')}Uložit informace</button></div>
+      <p class="form-message" role="status"></p>
+    </form>`;
+  document.body.append(dialog);
+  dialog.showModal();
+  dialog.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => dialog.close()));
+  dialog.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const message = dialog.querySelector('.form-message');
+    const submit = form.querySelector('[type="submit"]');
+    const values = Object.fromEntries(new FormData(form));
+    try {
+      submit.disabled = true;
+      message.textContent = 'Ukládám informace o modelu…';
+      await onSave?.(values);
+      dialog.close();
+    } catch (error) {
+      message.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+}
+
+export function showTagDialog(tag, { onSave, onEditLeaderLine, categories = DEFAULT_CATEGORIES, lineLengthOptions = {} }) {
   const draft = { title: '', category: 'kosti', description: '', lineLength: 1.5, ...tag };
   const lineLength = lineLengthControlValues({ ...lineLengthOptions, lineLength: draft.lineLength });
+  const categoryColour = (categoryId) => categories.find((category) => category.id === categoryId)?.color || categoryColor(categoryId);
+  const hasSurface = Boolean(draft.highlight);
+  const tagStyle = draft.style || draft.highlight;
+  const surfaceColorMode = tagStyle?.colorMode === 'custom' ? 'custom' : 'category';
+  const surfaceColor = surfaceColorMode === 'custom' ? tagStyle.color : categoryColour(draft.category);
   const dialog = document.createElement('dialog');
   dialog.className = 'modal';
   dialog.innerHTML = `
@@ -16,8 +72,9 @@ export function showTagDialog(tag, { onSave, categories = DEFAULT_CATEGORIES, li
       <label>Název štítku<input name="title" required value="${escapeHtml(draft.title)}" placeholder="Např. Hlavní vstup" /></label>
       <label>Kategorie<select name="category">${categories.map((category) => `<option value="${escapeHtml(category.id)}" ${draft.category === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}</select></label>
       ${lineLengthControlMarkup({ ...lineLengthOptions, lineLength: draft.lineLength })}
+      <fieldset class="modal-surface-tools"><legend>${hasSurface ? 'Plocha a vodicí čára' : 'Barva a vodicí čára'}</legend><label>${hasSurface ? 'Barva štítku a plochy' : 'Barva štítku a čáry'}<input type="color" name="surfaceColor" value="${escapeHtml(surfaceColor)}" ${surfaceColorMode === 'custom' ? '' : 'disabled'}></label><label class="modal-surface-override"><input type="checkbox" name="surfaceColorOverride" ${surfaceColorMode === 'custom' ? 'checked' : ''}> Ručně přepsat barvu kategorie</label><button type="button" class="small-button" data-edit-line>${actionIconMarkup('edit')}Upravit polohu čáry</button><p>Dialog se zavře a pak přetáhněte barevný kruh u plovoucího štítku.</p></fieldset>
       <label>Detailní popisek (podporuje [[Wiki odkazy]])<textarea name="description" rows="6" placeholder="Např. odkaz na související část…">${escapeHtml(draft.description)}</textarea></label>
-      <div class="form-actions"><button type="button" data-close class="button button-secondary">Zrušit</button><button class="button button-primary" type="submit">Uložit štítek</button></div>
+      <div class="form-actions"><button type="button" data-close class="button button-secondary">${actionIconMarkup('cancel')}Zrušit</button><button class="button button-primary" type="submit">${actionIconMarkup('save')}Uložit štítek</button></div>
     </form>`;
   document.body.append(dialog);
   dialog.showModal();
@@ -25,10 +82,40 @@ export function showTagDialog(tag, { onSave, categories = DEFAULT_CATEGORIES, li
   dialog.querySelector('[name="lineLength"]').addEventListener('input', (event) => {
     dialog.querySelector('[data-line-length]').textContent = formatLineLength(event.currentTarget.value, lineLength.step);
   });
+  const colorInput = dialog.querySelector('[name="surfaceColor"]');
+  const override = dialog.querySelector('[name="surfaceColorOverride"]');
+  const syncSurfaceColour = () => {
+    const automatic = categoryColour(dialog.querySelector('[name="category"]').value);
+    colorInput.disabled = !override.checked;
+    if (!override.checked) colorInput.value = automatic;
+  };
+  override.addEventListener('change', syncSurfaceColour);
+  dialog.querySelector('[name="category"]').addEventListener('change', syncSurfaceColour);
+  dialog.querySelector('[data-edit-line]').addEventListener('click', () => {
+    dialog.close();
+    onEditLeaderLine?.();
+  });
   dialog.querySelector('form').addEventListener('submit', (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    onSave({ ...draft, ...data, lineLength: Number(data.lineLength) });
+    const style = {
+      colorMode: dialog.querySelector('[name="surfaceColorOverride"]').checked ? 'custom' : 'category',
+      color: dialog.querySelector('[name="surfaceColor"]').value
+    };
+    const highlight = hasSurface ? {
+      ...draft.highlight,
+      colorMode: style.colorMode,
+      color: style.color
+    } : undefined;
+    onSave({
+      ...draft,
+      title: data.title,
+      category: data.category,
+      description: data.description,
+      style,
+      ...(highlight ? { highlight } : {}),
+      lineLength: Number(data.lineLength)
+    });
     dialog.close();
   });
   dialog.addEventListener('close', () => dialog.remove());
@@ -54,9 +141,9 @@ export function showCategoryDialog(categories, { onSave, usedCategoryIds = [], s
           <fieldset data-category-index="${index}"><legend><i class="category-swatch" style="--category-color:${escapeHtml(category.color || categoryColor(category.name))}"></i>${escapeHtml(category.name || 'Nová kategorie')}</legend>
             <label>Název<input name="name" value="${escapeHtml(category.name)}" placeholder="Např. Důležité body" required maxlength="100" /></label>
             <label>Vysvětlení<input name="description" value="${escapeHtml(category.description)}" maxlength="1000" /></label>
-            <button type="button" class="small-button category-remove" data-remove="${index}" ${used.has(category.id) ? 'disabled title="Kategorie se právě používá u štítku"' : ''}>Odstranit</button>
+            <button type="button" class="small-button category-remove" data-remove="${index}" ${used.has(category.id) ? 'disabled title="Kategorie se právě používá u štítku"' : ''}>${actionIconMarkup('delete')}Odstranit</button>
           </fieldset>`).join('') || '<p class="empty-note">Zatím nemáte žádné vlastní kategorie.</p>'}</div>
-        <div class="form-actions category-editor-actions"><button type="button" class="button button-secondary" data-add>＋ Přidat novou kategorii</button><button class="button button-primary" type="submit">Uložit kategorie</button></div>
+        <div class="form-actions category-editor-actions"><button type="button" class="button button-secondary" data-add>${actionIconMarkup('add')}Přidat novou kategorii</button><button class="button button-primary" type="submit">${actionIconMarkup('save')}Uložit kategorie</button></div>
         <p class="form-message" role="status"></p>
       </form>`;
     dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
@@ -120,7 +207,7 @@ export function showExportDialog(parserTag, { onPublish, onCopied, onPublished, 
       <textarea readonly rows="11" data-parser-tag>${escapeHtml(parserTag)}</textarea>
       <label>Článek s definicí modelu${pagePrefix ? ` <span class="namespace-prefix">${escapeHtml(pagePrefix)}:</span>` : ''}<input name="title" value="${escapeHtml(title)}" placeholder="Např. Srdce" /></label>
       <label>URL MediaWiki API<input name="endpoint" type="url" value="${escapeHtml(wikiConfig.endpoint || 'http://localhost:8000/api.php')}" /></label>
-      <div class="form-actions"><button type="button" data-copy class="button button-secondary">Kopírovat kód</button><button class="button button-primary" type="submit">Aktualizovat článek</button></div>
+      <div class="form-actions"><button type="button" data-copy class="button button-secondary">${actionIconMarkup('copy')}Kopírovat kód</button><button class="button button-primary" type="submit">${actionIconMarkup('save')}Aktualizovat článek</button></div>
       <p class="form-message" role="status"></p>
     </form>`;
   document.body.append(dialog);

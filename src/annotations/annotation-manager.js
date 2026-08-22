@@ -8,6 +8,7 @@ const DEFAULT_NORMAL = [0, 0, 1];
 const MIN_LINE_LENGTH = 0.0001;
 const ANCHOR_RADIUS = 0.11;
 const HANDLE_RADIUS = 0.17;
+const PAINT_OPACITY = 0.64;
 
 function endpointOf(tag) {
   const anchor = new THREE.Vector3().fromArray(tag.position);
@@ -37,6 +38,13 @@ function createLine(options) {
   return line;
 }
 
+function disposePaint(root) {
+  root.traverse((object) => {
+    object.geometry?.dispose?.();
+    object.material?.dispose?.();
+  });
+}
+
 /** Keeps Three.js leader lines and their screen-space Czech labels in sync. */
 export class AnnotationManager {
   constructor(sceneManager, layer, { onSelect, onChange } = {}) {
@@ -53,7 +61,15 @@ export class AnnotationManager {
     this.drag = null;
     this.preview = createLine({ color: '#68a9d5', width: 1.5, dashed: true });
     this.preview.visible = false;
-    this.sceneManager.annotationRoot.add(this.preview);
+    this.previewAnchor = new THREE.Mesh(
+      new THREE.SphereGeometry(ANCHOR_RADIUS, 16, 12),
+      new THREE.MeshBasicMaterial({ color: '#68a9d5', transparent: true, opacity: 0.92 })
+    );
+    this.previewAnchor.visible = false;
+    this.brushPreview = new THREE.Group();
+    this.brushPreview.name = 'Náhled štětce plochy';
+    this.sceneManager.annotationRoot.add(this.preview, this.previewAnchor);
+    this.sceneManager.annotationRoot.add(this.brushPreview);
   }
 
   setTags(tags = [], { preserveCategories = true, categories = [], hiddenTagIds = this.hiddenTagIds } = {}) {
@@ -73,7 +89,12 @@ export class AnnotationManager {
   }
 
   addVisual(tag) {
-    const color = this.categoryColors.get(tag.category) || colorForCategoryName(tag.category);
+    // A painted region is a visual object in its own right. Its colour must
+    // therefore also drive its line, anchor and floating label; categories
+    // remain a filtering/organisation aid rather than a competing palette.
+    const categoryColor = this.categoryColors.get(tag.category) || colorForCategoryName(tag.category);
+    const visualStyle = tag.style || tag.highlight;
+    const color = visualStyle?.colorMode === 'custom' ? visualStyle.color : categoryColor;
     const label = document.createElement('button');
     label.className = 'annotation-label';
     label.type = 'button';
@@ -97,18 +118,76 @@ export class AnnotationManager {
     handle.userData.annotationId = tag.id;
     handle.userData.isLeaderHandle = true;
     handle.visible = false;
-    this.sceneManager.annotationRoot.add(line, anchor, handle);
+    const highlight = this.createHighlight(tag.highlight, color);
+    this.sceneManager.annotationRoot.add(line, anchor, handle, highlight);
     this.layer.append(label);
-    this.items.set(tag.id, { tag, label, line, anchor, handle });
+    this.items.set(tag.id, { tag, label, line, anchor, handle, highlight });
   }
 
-  removeVisual({ label, line, anchor, handle }) {
+  removeVisual({ label, line, anchor, handle, highlight }) {
     label.remove();
-    [line, anchor, handle].forEach((object) => {
+    [line, anchor, handle, highlight].filter(Boolean).forEach((object) => {
       this.sceneManager.annotationRoot.remove(object);
-      object.geometry?.dispose?.();
-      object.material?.dispose?.();
+      if (object === highlight) disposePaint(object);
+      else {
+        object.geometry?.dispose?.();
+        object.material?.dispose?.();
+      }
     });
+  }
+
+  createPaintMark({ position, normal }, radius, color, { outline = false } = {}) {
+    const direction = new THREE.Vector3().fromArray(normal || DEFAULT_NORMAL).normalize();
+    const paintColor = new THREE.Color(color);
+    if (outline) paintColor.multiplyScalar(0.54);
+    const mesh = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * (outline ? 1.075 : 1), 28),
+      new THREE.MeshBasicMaterial({
+        color: paintColor,
+        transparent: true,
+        opacity: outline ? 0.88 : PAINT_OPACITY,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
+      })
+    );
+    mesh.position.fromArray(position).addScaledVector(direction, Math.max(radius * 0.003, 0.00001));
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    mesh.renderOrder = outline ? 2 : 3;
+    return mesh;
+  }
+
+  createHighlight(highlight, color) {
+    const group = new THREE.Group();
+    if (!highlight?.points?.length || !Number.isFinite(Number(highlight.radius))) return group;
+    const resolvedColor = color || highlight.color || '#d64b3b';
+    const outlines = new THREE.Group();
+    const fills = new THREE.Group();
+    // Render all borders first and all fills above them. Overlapping stamps in
+    // one stroke merge into a surface, while a neighbouring tag keeps a clean
+    // visible edge of its own.
+    highlight.points.forEach((point) => {
+      outlines.add(this.createPaintMark(point, Number(highlight.radius), resolvedColor, { outline: true }));
+      fills.add(this.createPaintMark(point, Number(highlight.radius), resolvedColor));
+    });
+    group.add(outlines, fills);
+    return group;
+  }
+
+  showBrushPreview(highlight) {
+    disposePaint(this.brushPreview);
+    this.brushPreview.clear();
+    const next = this.createHighlight(highlight);
+    this.brushPreview.add(...next.children);
+    this.brushPreview.visible = true;
+  }
+
+  hideBrushPreview() {
+    disposePaint(this.brushPreview);
+    this.brushPreview.clear();
+    this.brushPreview.visible = false;
   }
 
   select(id, { focus = true } = {}) {
@@ -156,7 +235,7 @@ export class AnnotationManager {
     const bounds = this.layer.getBoundingClientRect();
     const viewportSize = this.sceneManager.renderer.getSize(new THREE.Vector2());
     this.items.forEach((item) => {
-      const { tag, label, line, anchor, handle } = item;
+      const { tag, label, line, anchor, handle, highlight } = item;
       const isVisible = this.visibleCategories.has(tag.category) && !this.hiddenTagIds.has(tag.id);
       const start = new THREE.Vector3().fromArray(tag.position);
       const end = endpointOf(tag);
@@ -167,6 +246,7 @@ export class AnnotationManager {
       anchor.visible = isVisible;
       handle.position.copy(end);
       handle.visible = isVisible && tag.id === this.selectedId;
+      highlight.visible = isVisible;
       // Markers are screen-legible but never use an absolute world-unit minimum.
       // That would turn a marker into a disk on models with a small coordinate range.
       const worldStart = this.sceneManager.contentPointToWorld(start);
@@ -237,10 +317,15 @@ export class AnnotationManager {
     this.preview.computeLineDistances();
     this.preview.material.resolution.set(viewportSize.x, viewportSize.y);
     this.preview.visible = true;
+    this.previewAnchor.position.copy(start);
+    const worldStart = this.sceneManager.contentPointToWorld(start);
+    this.previewAnchor.scale.setScalar(this.markerRadius(worldStart, 'anchor') / ANCHOR_RADIUS);
+    this.previewAnchor.visible = true;
   }
 
   hidePreview() {
     this.preview.visible = false;
+    this.previewAnchor.visible = false;
   }
 
   beginHandleDrag(event) {
@@ -290,6 +375,11 @@ export class AnnotationManager {
     this.sceneManager.annotationRoot.remove(this.preview);
     this.preview.geometry.dispose();
     this.preview.material.dispose();
+    this.sceneManager.annotationRoot.remove(this.previewAnchor);
+    this.previewAnchor.geometry.dispose();
+    this.previewAnchor.material.dispose();
+    this.hideBrushPreview();
+    this.sceneManager.annotationRoot.remove(this.brushPreview);
     this.layer.replaceChildren();
   }
 }

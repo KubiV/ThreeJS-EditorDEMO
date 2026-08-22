@@ -4,11 +4,11 @@ export function createModel3dTag(model, camera) {
   return model3dTagFromModel(model, camera);
 }
 
-export async function publishToMediaWiki({ endpoint, title, text, oauthToken }) {
+export async function publishToMediaWiki({ endpoint, title, text, summary, createOnly = false, oauthToken }) {
   const response = await fetch('/api/wiki/publish', {
     method: 'POST',
     headers: { 'content-type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ endpoint, title, text, oauthToken })
+    body: JSON.stringify({ endpoint, title, text, summary, createOnly, oauthToken })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || 'Uložení do WikiSkript se nezdařilo.');
@@ -112,16 +112,6 @@ export async function publishWithWikiSession({ endpoint, title, text, summary = 
   const user = await fetchWikiSessionUser(endpoint);
   if (!user) throw new Error('Pro úpravy se nejprve přihlaste do MediaWiki.');
   if (!user.rights.includes('edit')) throw new Error(`Uživatel ${user.name} nemá na wiki právo upravovat stránky.`);
-  const tokenResponse = await wikiSessionRequest(endpoint, { action: 'query', meta: 'tokens' });
-  const token = tokenResponse.query?.tokens?.csrftoken;
-  if (!token) throw new Error('MediaWiki neposkytla CSRF token pro uložení.');
-  const edited = await wikiSessionRequest(endpoint, {
-    action: 'edit',
-    title,
-    text,
-    summary,
-    token,
-    ...(createOnly ? { createonly: '1' } : {})
-  });
-  return { ...edited, publishedTitle: title, user };
+  const published = await publishToMediaWiki({ endpoint, title, text, summary, createOnly });
+  return { ...published, publishedTitle: published.publishedTitle || title, user: published.user || user };
 }

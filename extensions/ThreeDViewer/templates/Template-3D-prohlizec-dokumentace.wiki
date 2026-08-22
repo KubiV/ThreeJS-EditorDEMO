@@ -31,7 +31,7 @@
  | načíst po kliknutí = ne
 }}</nowiki></pre>
 
-Vložený prohlížeč obsahuje filtrování kategorií, výběr popisků a jejich vysvětlení. Pro samostatné otevření místo vložení použijte <code><nowiki>{{3D odkaz}}</nowiki></code>.
+Vložený prohlížeč obsahuje filtrování kategorií, výběr popisků a jejich vysvětlení. Navigační kostka je ve vloženém prohlížeči ve výchozím nastavení skrytá; návštěvník ji může zapnout ve svém uživatelském nastavení. Pro samostatné otevření místo vložení použijte <code><nowiki>{{3D odkaz}}</nowiki></code>.
 
 == Související stránky ==
 

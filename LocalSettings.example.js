@@ -56,6 +56,17 @@ export default {
       // 'teacher'] povolí modely jen členům těchto MediaWiki skupin. Funguje
       // pouze s režimem 'login-required'.
       allowedGroups: []
+    },
+    // Řízení správy nahraných modelů podle přesných jmen účtů MediaWiki.
+    // Výchozí false zachovává chování starších instalací: každý přihlášený
+    // editor MediaWiki může upravovat modely. Po doplnění vlastníků u starých
+    // záznamů lze nastavit true a omezit úpravy na vlastníka + editors.
+    // Mazání a nově vykreslení náhledu jsou samostatná, silnější oprávnění.
+    modelManagement: {
+      requireOwnershipForEdits: false,
+      editors: [],
+      deleters: [],
+      thumbnailRegenerators: []
     }
   },
 
