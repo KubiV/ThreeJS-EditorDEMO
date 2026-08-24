@@ -1,0 +1,24 @@
+{
+  "name": "3D prohlížeč",
+  "short_name": "3D prohlížeč",
+  "description": "Interaktivní 3D prohlížeč a editor modelů pro MediaWiki.",
+  "lang": "cs",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffbe00",
+  "theme_color": "#ffbe00",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
