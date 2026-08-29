@@ -20,6 +20,7 @@ export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = nu
               <h2>Jak prohlížeč funguje</h2>
               <p>Prohlížeč načítá data z článků v prostoru <code>3D:</code>. Samotné 3D soubory jsou odděleně v úložišti modelů.</p>
               <p>U modelu můžete otáčet pohledem, přibližovat jej a vybírat štítky. Jejich popisky, kategorie a poloha jsou uložené u příslušného článku.</p>
+              <p>Předvolby prohlížení a ovládání (např. způsob otáčení, navigační kostku nebo strategii načítání) si můžete přizpůsobit v sekci <strong>Nastavení</strong> (ikona ozubeného kola v horní liště).</p>
             </section>
 
             <section class="about-section about-section-highlight">
@@ -43,11 +44,18 @@ export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = nu
             </section>
           </div>
 
-          <div class="about-actions"><button type="button" class="button button-primary" data-action="home">${actionIconMarkup('open')}Zobrazit 3D modely</button></div>
+          <div class="about-actions">
+            <button type="button" class="button button-primary" data-action="home">${actionIconMarkup('open')}Zobrazit 3D modely</button>
+            <button type="button" class="button button-secondary" data-action="user-settings">${settingsIconMarkup()}Uživatelské nastavení</button>
+          </div>
+
+          <footer class="about-footer">
+            <p>Autor: <a href="https://www.wikiskripta.eu/w/U%C5%BEivatel:KubiV" target="_blank" rel="noopener noreferrer">Jakub Vávra</a></p>
+          </footer>
         </article>
       </div>
     </main>`;
 
   host.querySelectorAll('[data-action="home"]').forEach((button) => button.addEventListener('click', onHome));
-  host.querySelector('[data-action="user-settings"]')?.addEventListener('click', onSettings);
+  host.querySelectorAll('[data-action="user-settings"]').forEach((button) => button.addEventListener('click', onSettings));
 }

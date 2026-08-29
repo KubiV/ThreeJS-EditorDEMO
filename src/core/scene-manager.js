@@ -33,6 +33,15 @@ export class SceneManager {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE
+    };
+    this.controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN
+    };
     this.navigationMode = 'orbit';
     this.controls.target.set(0, 0, 0);
     this.raycaster = new THREE.Raycaster();
@@ -232,7 +241,8 @@ export class SceneManager {
   }
 
   beginContentRotation(event) {
-    if (this.rotationGizmoVisible() || this.navigationMode === 'orbit' || !this.modelRoot.children.length || event.button !== 0) return false;
+    if (this.rotationGizmoVisible() || this.navigationMode === 'orbit' || !this.modelRoot.children.length) return false;
+    if (event.button !== 0 && event.button !== 2) return false;
     const point = this.contentTrackballPoint(event);
     if (!point) return false;
     this.animation = null;

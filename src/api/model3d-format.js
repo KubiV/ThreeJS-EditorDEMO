@@ -43,9 +43,14 @@ function hslToHex(hue, saturation, lightness) {
   return `#${[red, green, blue].map((channel) => Math.round((channel + match) * 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
+export const DEFAULT_GENERAL_CATEGORY_COLOR = '#1f2328';
+
 /** Stable category colour: equal names receive the same contrast-safe hue. */
 export function categoryColor(value) {
   const key = colorKey(value) || DEFAULT_CATEGORY_ID;
+  if (['obecne', 'obecna', 'general', 'obecny', 'default'].includes(key)) {
+    return DEFAULT_GENERAL_CATEGORY_COLOR;
+  }
   let hash = 2166136261;
   for (const character of key) {
     hash ^= character.codePointAt(0);
@@ -118,9 +123,10 @@ export function model3dTagFromModel(model, camera = model.camera) {
         ...(finiteQuaternion(camera.modelQuaternion) ? { modelQuaternion: camera.modelQuaternion.map(rounded) } : {})
       }
     } : {}),
-    tags: (model.tags || []).map(({ id, title, category, position, normal, lineLength, description, highlight, style }) => {
+    tags: (model.tags || []).map(({ id, title, category, position, normal, lineLength, description, highlight, style, module: tagModule }) => {
       const cleanHighlightValue = cleanHighlight(highlight);
       const cleanStyleValue = cleanTagStyle(style);
+      const cleanModuleValue = cleanTagModule(tagModule);
       return {
         id,
         title,
@@ -128,6 +134,7 @@ export function model3dTagFromModel(model, camera = model.camera) {
         position: position.map(rounded),
         normal: normal.map(rounded),
         lineLength: rounded(lineLength),
+        ...(cleanModuleValue ? { module: cleanModuleValue } : {}),
         ...(cleanStyleValue ? { style: cleanStyleValue } : {}),
         ...(cleanHighlightValue ? {
           highlight: {
@@ -215,6 +222,7 @@ function cleanTag(tag, index) {
   if (!tag || typeof tag !== 'object') return null;
   const highlight = cleanHighlight(tag.highlight);
   const style = cleanTagStyle(tag.style);
+  const moduleData = cleanTagModule(tag.module);
   return {
     id: String(tag.id || `tag-${index + 1}`).slice(0, 100),
     title: String(tag.title || 'Nový štítek').slice(0, 160),
@@ -222,9 +230,27 @@ function cleanTag(tag, index) {
     position: finiteVector(tag.position, [0, 0, 0]),
     normal: finiteVector(tag.normal, [0, 0, 1]),
     lineLength: Number.isFinite(Number(tag.lineLength)) ? Math.max(0.0001, Number(tag.lineLength)) : 1.5,
+    ...(moduleData ? { module: moduleData } : {}),
     ...(style ? { style } : {}),
     ...(highlight ? { highlight } : {}),
     description: String(tag.description || '').slice(0, 20000)
+  };
+}
+
+export function cleanTagModule(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const id = String(value.id || '').trim().slice(0, 60);
+  const termId = String(value.termId || '').trim().slice(0, 60);
+  const latin = String(value.latin || '').trim().slice(0, 200);
+  const english = String(value.english || '').trim().slice(0, 200);
+  const system = String(value.system || '').trim().slice(0, 100);
+  if (!id && !termId && !latin) return undefined;
+  return {
+    id: id || 'anatomy',
+    ...(termId ? { termId } : {}),
+    ...(latin ? { latin } : {}),
+    ...(english ? { english } : {}),
+    ...(system ? { system } : {})
   };
 }
 

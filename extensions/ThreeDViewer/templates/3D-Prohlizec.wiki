@@ -2,6 +2,8 @@
 
 Prohlížeč načítá data z článků v prostoru <code>3D:</code>. Samotné 3D soubory jsou odděleně v úložišti modelů.
 
+U modelu můžete otáčet pohledem, přibližovat jej a vybírat štítky. Jejich popisky, kategorie a poloha jsou uložené u příslušného článku. Způsob prohlížení a ovládání (např. režim otáčení, navigační kostku nebo strategii načítání) si můžete přizpůsobit v sekci Uživatelské nastavení.
+
 Pro změnu popisků, kategorií nebo kamery otevřete model ve vieweru tlačítkem ''Editovat''. Je nutné být přihlášen do MediaWiki účtem s právem upravovat danou stránku. Viewer používá skutečnou přihlašovací relaci MediaWiki; heslo ani cookie se do editoru neukládají.
 
 == Vložení modelu do článku ==
@@ -11,3 +13,5 @@ Do běžného článku vložíte model šablonou <code><nowiki>{{3D prohlížeč
 Pokud článek potřebuje pouze odkaz do samostatného prohlížeče, použijte <code><nowiki>{{3D odkaz|model=3D:Název modelu}}</nowiki></code>. Odkaz se otevře v novém okně a ve výchozím nastavení zobrazí text „Otevřít interaktivní 3D prohlížeč“ s ikonou 3D krychle. Vlastní text odkazu nastavíte parametrem <code>text</code>, například <code><nowiki>{{3D odkaz|model=3D:Femur|text=Prohlédnout femur}}</nowiki></code>.
 
 Podrobný popis všech parametrů najdete na podstránkách [[Template:3D prohlížeč/dokumentace|Šablona:3D prohlížeč/dokumentace]] a [[Template:3D odkaz/dokumentace|Šablona:3D odkaz/dokumentace]].
+
+''Autor: [https://www.wikiskripta.eu/w/U%C5%BEivatel:KubiV Jakub Vávra]''

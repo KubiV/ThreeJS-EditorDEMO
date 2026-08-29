@@ -242,8 +242,9 @@ export class AnnotationManager {
       line.geometry.setPositions([...start.toArray(), ...end.toArray()]);
       line.material.resolution.set(viewportSize.x, viewportSize.y);
       line.visible = isVisible;
+      const hasSurface = Boolean(tag.highlight?.points?.length);
       anchor.position.copy(start);
-      anchor.visible = isVisible;
+      anchor.visible = isVisible && !hasSurface;
       handle.position.copy(end);
       handle.visible = isVisible && tag.id === this.selectedId;
       highlight.visible = isVisible;
@@ -294,17 +295,18 @@ export class AnnotationManager {
     return THREE.MathUtils.clamp(desired, minimum, maximum);
   }
 
-  showPreview(intersection, lineLength) {
+  showPreview(intersection, lineLength, options = {}) {
     if (!intersection?.face) return this.hidePreview();
     const normal = intersection.face.normal.clone().transformDirection(intersection.object.matrixWorld).normalize();
     this.showPreviewAt(
       this.sceneManager.worldPointToContent(intersection.point),
       this.sceneManager.worldDirectionToContent(normal),
-      lineLength
+      lineLength,
+      options
     );
   }
 
-  showPreviewAt(position, normal, lineLength) {
+  showPreviewAt(position, normal, lineLength, { hasSurface = false } = {}) {
     const start = position.clone ? position.clone() : new THREE.Vector3().fromArray(position);
     const direction = normal.clone ? normal.clone().normalize() : new THREE.Vector3().fromArray(normal || DEFAULT_NORMAL).normalize();
     const requestedLength = Number(lineLength);
@@ -320,7 +322,7 @@ export class AnnotationManager {
     this.previewAnchor.position.copy(start);
     const worldStart = this.sceneManager.contentPointToWorld(start);
     this.previewAnchor.scale.setScalar(this.markerRadius(worldStart, 'anchor') / ANCHOR_RADIUS);
-    this.previewAnchor.visible = true;
+    this.previewAnchor.visible = !hasSurface;
   }
 
   hidePreview() {

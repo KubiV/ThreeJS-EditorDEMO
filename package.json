@@ -10,7 +10,8 @@
     "start": "node server.js",
     "build": "npm run generate:icons && vite build",
     "preview": "vite preview",
-    "generate:icons": "node scripts/generate-favicons.mjs"
+    "generate:icons": "node scripts/generate-favicons.mjs",
+    "build:anatomy": "node scripts/build-anatomy-data.mjs"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",
@@ -22,6 +23,7 @@
     "three": "^0.165.0"
   },
   "devDependencies": {
-    "vite": "^5.3.1"
+    "vite": "^5.3.1",
+    "xlsx": "^0.18.5"
   }
 }

@@ -1,8 +1,28 @@
-import { categoryColor, capitalizeTitle, normalizeCategoryDefinitions } from '../api/model3d-format.js';
+import { categoryColor, capitalizeTitle, normalizeCategoryDefinitions, DEFAULT_GENERAL_CATEGORY_COLOR } from '../api/model3d-format.js';
 import { escapeHtml, renderWikitext } from '../annotations/wikitext.js';
 import { actionIconMarkup } from './brand.js';
+import { getIfaaUrl } from '../modules/anatomy/index.js';
 
-export const DEFAULT_CATEGORIES = [{ id: 'obecne', name: 'Obecné', description: '' }];
+export const DEFAULT_CATEGORIES = [{ id: 'obecne', name: 'Obecné', description: '', color: DEFAULT_GENERAL_CATEGORY_COLOR }];
+
+export const ANATOMY_SYSTEM_NAMES = {
+  'anatomia-generalis': { name: 'Anatomia generalis (Obecná anatomie)', color: '#708090' },
+  'ossa': { name: 'Ossa (Kosterní soustava)', color: '#d4a373' },
+  'juncturae': { name: 'Juncturae (Kloubní soustava)', color: '#c08497' },
+  'musculi': { name: 'Musculi (Svalová soustava)', color: '#c94c4c' },
+  'systema-digestorium': { name: 'Systema digestorium (Trávicí soustava)', color: '#e29578' },
+  'systema-respiratorium': { name: 'Systema respiratorium (Dýchací soustava)', color: '#83c5be' },
+  'cavitas-thoracis': { name: 'Cavitas thoracis (Hrudní dutina)', color: '#588b8b' },
+  'systema-urinarium': { name: 'Systema urinarium (Močová soustava)', color: '#e9c46a' },
+  'systemata-genitalia': { name: 'Systemata genitalia (Pohlavní soustava)', color: '#f4a261' },
+  'cavitas-abdominis': { name: 'Cavitas abdominis (Břišní a pánevní dutina)', color: '#c6ad8f' },
+  'glandulae-endocrinae': { name: 'Glandulae endocrinae (Endokrinní žlázy)', color: '#9b5de5' },
+  'systema-cardiovasculare': { name: 'Systema cardiovasculare (Srdečně-cévní soustava)', color: '#e63946' },
+  'systema-lymphoideum': { name: 'Systema lymphoideum (Mízní soustava)', color: '#52b788' },
+  'systema-nervosum': { name: 'Systema nervosum (Nervová soustava)', color: '#3a86ff' },
+  'organa-sensuum': { name: 'Organa sensuum (Smyslové orgány)', color: '#00b4d8' },
+  'integumentum-commune': { name: 'Integumentum commune (Kůže a deriváty)', color: '#bc6c25' }
+};
 
 export function categoryDefinitions(categories = [], tags = []) {
   // The shared catalogue is combined with legacy categories stored on older
@@ -20,8 +40,10 @@ export function categoryDefinitions(categories = [], tags = []) {
     const id = String(tag.category || 'obecne');
     if (!known.has(id)) {
       known.add(id);
-      const name = capitalizeTitle(id, 'Obecné');
-      definitions.push({ id, name, description: '', color: categoryColor(name) });
+      const knownSys = ANATOMY_SYSTEM_NAMES[id];
+      const name = knownSys?.name || capitalizeTitle(id, 'Obecné');
+      const color = knownSys?.color || categoryColor(name);
+      definitions.push({ id, name, description: '', color });
     }
   });
   return definitions.length ? definitions : normalizeCategoryDefinitions(DEFAULT_CATEGORIES);
@@ -51,6 +73,21 @@ function safeLink(value) {
   }
 }
 
+function renderTagModuleBadge(moduleData) {
+  if (!moduleData) return '';
+  const ifaaUrl = moduleData.termId ? getIfaaUrl(moduleData.termId) : '';
+  const codeMarkup = ifaaUrl
+    ? `<a href="${escapeHtml(ifaaUrl)}" target="_blank" rel="noopener noreferrer" class="assigned-term-code-link" title="Otevřít oficiální strom Terminologia Anatomica (IFAA)">${escapeHtml(moduleData.termId || '–')} ↗</a>`
+    : `<strong class="assigned-term-code">${escapeHtml(moduleData.termId || '–')}</strong>`;
+  return `
+    <div class="tag-module-info">
+      <span class="assigned-term-badge">TA 1989</span>
+      ${codeMarkup}
+      ${moduleData.parent ? `<span class="assigned-term-parent-badge" title="Nadřazená struktura / kost">📍 ${escapeHtml(moduleData.parent)}</span>` : ''}
+      ${moduleData.english ? `<span class="assigned-term-english">(${escapeHtml(moduleData.english)})</span>` : ''}
+    </div>`;
+}
+
 function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, actions) {
   const tags = model.tags || [];
   const categoryById = new Map(definitions.map((category) => [category.id, category]));
@@ -71,11 +108,15 @@ function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, act
       const color = category?.color || categoryColor(category?.name || id);
       const categoryTags = visibleTags.filter((tag) => (tag.category || 'obecne') === id);
       if (!categoryTags.length) return '';
-      return `<section class="embed-tag-group"><h2><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}<small>${categoryTags.length}</small></h2><div>${categoryTags.map((tag) => `<button type="button" class="embed-tag-item ${tag.id === selectedVisible?.id ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.title)}</span><span aria-hidden="true">→</span></button>`).join('')}</div></section>`;
+      return `<section class="embed-tag-group"><h2><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}<small>${categoryTags.length}</small></h2><div>${categoryTags.map((tag) => {
+        const taBadge = tag.module?.termId ? `<em class="surface-tag-badge ta-badge" title="Terminologia Anatomica: ${escapeHtml(tag.module.termId)}">${escapeHtml(tag.module.termId)}</em>` : '';
+        return `<button type="button" class="embed-tag-item ${tag.id === selectedVisible?.id ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.title)}${taBadge}</span><span aria-hidden="true">→</span></button>`;
+      }).join('')}</div></section>`;
     }).join('');
+  const embeddedModuleInfo = renderTagModuleBadge(selectedVisible?.module);
   const panelContent = panelMode === 'list'
     ? `<section class="embed-tag-groups" aria-label="Seznam štítků podle kategorií">${tagGroups || `<p class="embed-empty-note">${tags.length ? 'Vyberte alespoň jednu kategorii.' : 'Model nemá žádné popisky.'}</p>`}</section>`
-    : `<section class="embed-description ${selectedVisible ? '' : 'is-empty'}" aria-live="polite">${selectedVisible ? `<h2>${escapeHtml(selectedVisible.title)}</h2><p class="embed-category">${escapeHtml(categoryName(selectedVisible.category, definitions))}</p><div class="wikitext">${renderWikitext(selectedVisible.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Klikněte na štítek přímo v 3D modelu. Jeho popisek se zobrazí zde.</p>'}</section>`;
+    : `<section class="embed-description ${selectedVisible ? '' : 'is-empty'}" aria-live="polite">${selectedVisible ? `<h2>${escapeHtml(selectedVisible.title)}</h2><p class="embed-category">${escapeHtml(categoryName(selectedVisible.category, definitions))}</p>${embeddedModuleInfo}<div class="wikitext">${renderWikitext(selectedVisible.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Klikněte na štítek přímo v 3D modelu. Jeho popisek se zobrazí zde.</p>'}</section>`;
   host.innerHTML = `
     <aside class="embed-sidebar" aria-label="Popisky modelu">
       <p class="eyebrow">3D POPISKY</p>
@@ -112,7 +153,8 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
     const categoryColorValue = category?.color || categoryColor(categoryName(tag.category, definitions));
     const color = (tag.style || tag.highlight)?.colorMode === 'custom' ? (tag.style || tag.highlight).color : categoryColorValue;
     const hidden = state.hiddenTags?.has(tag.id);
-    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}${tag.highlight ? '<em class="surface-tag-badge">Plocha</em>' : ''}</small></span></button><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${actionIconMarkup(hidden ? 'eye' : 'eyeOff')}${hidden ? 'Zobrazit' : 'Skrýt'}</button></div>`;
+    const taBadge = tag.module?.termId ? `<em class="surface-tag-badge ta-badge" title="Terminologia Anatomica: ${escapeHtml(tag.module.termId)}">${escapeHtml(tag.module.termId)}</em>` : '';
+    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}${tag.highlight ? '<em class="surface-tag-badge">Plocha</em>' : ''}${taBadge}</small></span></button><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${actionIconMarkup(hidden ? 'eye' : 'eyeOff')}${hidden ? 'Zobrazit' : 'Skrýt'}</button></div>`;
   }).join('');
   const smallInfo = model.variantInfo?.small || model.variantInfo?.low;
   const mediumInfo = model.variantInfo?.medium;
@@ -186,6 +228,7 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
     const color = category?.color || categoryColor(category?.name || id);
     return `<label title="${escapeHtml(category?.description || '')}"><input type="checkbox" data-category="${escapeHtml(id)}" aria-label="Zobrazit kategorii ${escapeHtml(category?.name || id)}" ${state.categories.has(id) ? 'checked' : ''}><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}</label>`;
   }).join('');
+  const sidebarModuleDetail = renderTagModuleBadge(selectedTag?.module);
   host.innerHTML = `
     <aside class="sidebar ${collapsed ? 'is-collapsed' : ''}">
       <div class="sidebar-top"><button class="icon-button" data-action="back" title="Zpět na 3D rozcestník" aria-label="Zpět na 3D rozcestník">←</button><div><strong>${escapeHtml(model.title)}</strong><small>${escapeHtml(model.article || '3D model')}</small></div><button class="icon-button sidebar-toggle" data-action="collapse" title="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}" aria-label="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}">${collapsed ? '⌄' : '⌃'}</button></div>
@@ -193,7 +236,7 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
         <section class="panel-section tag-section"><div class="panel-heading"><h2>Štítky a popisky</h2><span>${model.tags?.length || 0}</span></div>${editable && !state.tagDraftActive ? `<button type="button" class="tag-draft-launcher" data-action="add-tag">${actionIconMarkup('add')}Přidat štítek</button>` : ''}<div class="tag-tools"><button class="small-button" data-action="show-all">${actionIconMarkup('eye')}Zobrazit vše</button><button class="small-button" data-action="hide-all">${actionIconMarkup('eyeOff')}Skrýt vše</button>${editable ? `<button class="small-button" data-action="add-category">${actionIconMarkup('add')}Kategorie</button><button class="small-button" data-action="manage-categories">${actionIconMarkup('edit')}Správa</button>` : ''}</div>
         ${categoryFilters ? `<p class="tag-visibility-heading">Zobrazení podle kategorií</p><div class="category-filters">${categoryFilters}</div>` : ''}
         <div class="tag-list">${tagList || '<p class="empty-note">Zatím nejsou vloženy žádné štítky.</p>'}</div></section>
-        <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><h2>${escapeHtml(selectedTag.title)}</h2>${editable ? `<div class="description-actions"><button class="small-button" data-action="edit-tag">${actionIconMarkup('edit')}Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">${actionIconMarkup('delete')}Odstranit</button></div>` : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
+        <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><div><h2>${escapeHtml(selectedTag.title)}</h2>${sidebarModuleDetail}</div>${editable ? `<div class="description-actions"><button class="small-button" data-action="edit-tag">${actionIconMarkup('edit')}Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">${actionIconMarkup('delete')}Odstranit</button></div>` : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
         ${appearancePanel}
         ${isAdvanced ? `${defaultViewPanel}${orientationPanel}${technicalInfo}` : ''}
         ${managementPanel}

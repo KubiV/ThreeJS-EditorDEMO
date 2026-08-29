@@ -1149,17 +1149,44 @@ function handleSidebarAction(action) {
   }
 }
 
+function getActiveTagSession() {
+  if (tagEditor) {
+    return {
+      isEditor: true,
+      draft: tagEditor.draft,
+      repositioningAnchor: Boolean(tagEditor.repositioningAnchor),
+      setRepositioningAnchor: (val) => { tagEditor.repositioningAnchor = val; },
+      hasEditedAnchor: Boolean(tagEditor.hasEditedAnchor),
+      setHasEditedAnchor: (val) => { tagEditor.hasEditedAnchor = val; }
+    };
+  }
+  if (tagDraft) {
+    return {
+      isEditor: false,
+      draft: tagDraft,
+      repositioningAnchor: Boolean(tagDraft.repositioningAnchor),
+      setRepositioningAnchor: (val) => { tagDraft.repositioningAnchor = val; },
+      hasEditedAnchor: Boolean(tagDraft.position),
+      setHasEditedAnchor: () => {}
+    };
+  }
+  return null;
+}
+
 function attachViewportInteractions() {
   const canvas = sceneManager.renderer.domElement;
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
   canvas.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    if (tagDraft?.brushMode) {
+    // If right-click (button 2), middle-click (button 1) or Alt key is pressed,
+    // let OrbitControls / content rotation handle rotating the view.
+    if (event.button !== 0 || event.altKey) return;
+
+    const session = getActiveTagSession();
+    if (session && session.draft.brushMode && !session.repositioningAnchor) {
       const hit = sceneManager.intersectModel(event);
       if (!hit?.face) {
-        // Brush mode deliberately locks navigation even when a gesture begins
-        // beside the mesh; otherwise a missed stroke can rotate the model.
-        event.preventDefault();
-        event.stopPropagation();
+        // Clicking in empty background: let OrbitControls rotate the camera/model!
         return;
       }
       brushStroke = { pointerId: event.pointerId, controlsEnabled: sceneManager.controls.enabled };
@@ -1167,7 +1194,7 @@ function attachViewportInteractions() {
       // well. Disabling it in capture phase keeps a brush stroke from also
       // starting a camera/model rotation.
       sceneManager.controls.enabled = false;
-      paintDraftAt(hit);
+      paintStrokeAt(hit, session);
       canvas.setPointerCapture?.(event.pointerId);
       event.preventDefault();
       return;
@@ -1185,18 +1212,25 @@ function attachViewportInteractions() {
   canvas.addEventListener('pointermove', (event) => {
     if (brushStroke?.pointerId === event.pointerId) {
       const hit = sceneManager.intersectModel(event);
-      if (hit?.face) paintDraftAt(hit);
+      const session = getActiveTagSession();
+      if (hit?.face && session) paintStrokeAt(hit, session);
       return;
     }
     if (annotationManager.dragHandle(event)) return;
     if (sceneManager.dragContentRotation(event)) return;
-    if (tagEditor?.repositioningAnchor) {
-      annotationManager.showPreview(sceneManager.intersectModel(event), tagEditor.draft.lineLength);
-      return;
+    const session = getActiveTagSession();
+    if (session) {
+      if (session.repositioningAnchor) {
+        const hasSurface = Boolean(session.draft.highlight?.points?.length);
+        annotationManager.showPreview(sceneManager.intersectModel(event), session.draft.lineLength, { hasSurface });
+        return;
+      }
+      if (!session.isEditor) {
+        const hasSurface = Boolean(tagDraft.highlight?.points?.length);
+        if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength, { hasSurface });
+        else annotationManager.showPreview(sceneManager.intersectModel(event), tagDraft.lineLength, { hasSurface });
+      }
     }
-    if (!tagDraft) return;
-    if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
-    else annotationManager.showPreview(sceneManager.intersectModel(event), tagDraft.lineLength);
   });
   canvas.addEventListener('pointerup', (event) => {
     if (brushStroke?.pointerId === event.pointerId) {
@@ -1241,26 +1275,36 @@ function attachViewportInteractions() {
       ignoreNextClick = false;
       return;
     }
-    if (!settings.canEdit || (!tagDraft && !tagEditor?.repositioningAnchor) || tagDraft?.brushMode) return;
+    const session = getActiveTagSession();
+    if (!settings.canEdit || !session) return;
+    if (session.draft.brushMode && !session.repositioningAnchor) return;
+
     const hit = sceneManager.intersectModel(event);
     if (!hit?.face) return;
     const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-    if (tagEditor?.repositioningAnchor) {
-      tagEditor.draft.position = sceneManager.worldPointToContent(hit.point).toArray();
-      tagEditor.draft.normal = sceneManager.worldDirectionToContent(normal).toArray();
-      tagEditor.repositioningAnchor = false;
-      tagEditor.hasEditedAnchor = true;
-      annotationManager.showPreviewAt(tagEditor.draft.position, tagEditor.draft.normal, tagEditor.draft.lineLength);
+
+    if (session.repositioningAnchor) {
+      session.draft.position = sceneManager.worldPointToContent(hit.point).toArray();
+      session.draft.normal = sceneManager.worldDirectionToContent(normal).toArray();
+      session.setRepositioningAnchor(false);
+      session.setHasEditedAnchor(true);
+      const hasSurface = Boolean(session.draft.highlight?.points?.length);
+      annotationManager.showPreviewAt(session.draft.position, session.draft.normal, session.draft.lineLength, { hasSurface });
+      if (!session.isEditor) saveTagDraft();
       renderTagDraft();
-      showToast('Nový bod na modelu je vybraný. Uložte změny štítku.');
+      showToast('Nový bod na modelu je vybraný.');
       return;
     }
-    tagDraft.position = sceneManager.worldPointToContent(hit.point).toArray();
-    tagDraft.normal = sceneManager.worldDirectionToContent(normal).toArray();
-    annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
-    saveTagDraft();
-    renderTagDraft();
-    showToast('Bod štítku je vybraný. Dokončete údaje a uložte štítek.');
+
+    if (!session.isEditor) {
+      tagDraft.position = sceneManager.worldPointToContent(hit.point).toArray();
+      tagDraft.normal = sceneManager.worldDirectionToContent(normal).toArray();
+      const hasSurface = Boolean(tagDraft.highlight?.points?.length);
+      annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength, { hasSurface });
+      saveTagDraft();
+      renderTagDraft();
+      showToast('Bod štítku je vybraný. Dokončete údaje a uložte štítek.');
+    }
   });
   canvas.addEventListener('wheel', (event) => {
     if (!settings.canEdit || !selectedTag || !(event.shiftKey || leaderKeyActive)) return;
@@ -1277,29 +1321,37 @@ function attachViewportInteractions() {
   }, { passive: false });
 }
 
-function paintDraftAt(hit) {
-  if (!tagDraft?.brushMode || !hit?.face) return false;
+function paintStrokeAt(hit, session = getActiveTagSession()) {
+  if (!session?.draft?.brushMode || !hit?.face) return false;
+  const draft = session.draft;
   const position = sceneManager.worldPointToContent(hit.point).toArray();
   const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
   const normal = sceneManager.worldDirectionToContent(worldNormal).toArray();
-  const colorMode = tagDraft.brushColorMode === 'custom' ? 'custom' : 'category';
-  const color = colorMode === 'custom' ? tagDraft.brushColor : categoryBrushColor(tagDraft.category);
-  tagDraft.highlight ||= { colorMode, color, radius: tagDraft.brushRadius, points: [] };
-  const radius = Number(tagDraft.brushRadius || tagDraft.highlight.radius);
-  const previous = tagDraft.highlight.points.at(-1);
+  const colorMode = (draft.brushColorMode === 'custom' || draft.style?.colorMode === 'custom') ? 'custom' : 'category';
+  const color = colorMode === 'custom'
+    ? (draft.brushColor || draft.style?.color || '#d64b3b')
+    : categoryBrushColor(draft.category);
+  draft.highlight ||= { colorMode, color, radius: draft.brushRadius, points: [] };
+  const radius = Number(draft.brushRadius || draft.highlight.radius);
+  const previous = draft.highlight.points.at(-1);
   if (previous && new THREE.Vector3().fromArray(previous.position).distanceTo(new THREE.Vector3().fromArray(position)) < radius * 0.32) return false;
-  if (tagDraft.highlight.points.length >= 240) return false;
-  tagDraft.highlight.colorMode = colorMode;
-  tagDraft.highlight.color = color;
-  tagDraft.highlight.radius = radius;
-  tagDraft.highlight.points.push({ position, normal });
-  if (!tagDraft.position) {
-    tagDraft.position = position;
-    tagDraft.normal = normal;
-    annotationManager.showPreviewAt(position, normal, tagDraft.lineLength);
+  if (draft.highlight.points.length >= 240) return false;
+  draft.highlight.colorMode = colorMode;
+  draft.highlight.color = color;
+  draft.highlight.radius = radius;
+  draft.highlight.points.push({ position, normal });
+  if (!draft.position) {
+    draft.position = position;
+    draft.normal = normal;
   }
-  annotationManager.showBrushPreview(tagDraft.highlight);
-  saveTagDraft();
+  annotationManager.showBrushPreview(draft.highlight);
+  if (draft.position && draft.normal) {
+    const hasSurface = Boolean(draft.highlight?.points?.length);
+    annotationManager.showPreviewAt(draft.position, draft.normal, draft.lineLength, { hasSurface });
+  }
+  if (!session.isEditor) {
+    saveTagDraft();
+  }
   return true;
 }
 
@@ -1442,7 +1494,8 @@ function syncTagDraftToModel() {
     ...brushLimits,
     lineLength: Math.min(limits.maxLineLength, Math.max(limits.minLineLength, Number(tagDraft.lineLength) || limits.lineLength))
   };
-  if (tagDraft.position && tagDraft.normal) annotationManager?.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
+  const hasSurface = Boolean(tagDraft.highlight?.points?.length);
+  if (tagDraft.position && tagDraft.normal) annotationManager?.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength, { hasSurface });
   if (tagDraft.highlight) annotationManager?.showBrushPreview(tagDraft.highlight);
   saveTagDraft();
   renderTagDraft();
@@ -1483,6 +1536,17 @@ function closeTagDraft() {
   renderCurrentSidebar();
 }
 
+function editDraftAnchor() {
+  if (tagDraft && settings.canEdit) {
+    tagDraft.repositioningAnchor = !tagDraft.repositioningAnchor;
+    if (!tagDraft.repositioningAnchor && !tagDraft.position) annotationManager.hidePreview();
+    renderTagDraft();
+    showToast(tagDraft.repositioningAnchor
+      ? 'Klikněte na nové místo na povrchu modelu pro nastavení výchozího bodu čáry.'
+      : 'Výběr bodu byl zrušen.');
+  }
+}
+
 function renderTagDraft() {
   const host = document.querySelector('#tag-draft-host');
   if (!host) return;
@@ -1491,13 +1555,54 @@ function renderTagDraft() {
       categories: currentCategoryDefinitions(),
       onChange: (changes) => {
         Object.assign(tagEditor.draft, changes);
-        if (tagEditor.draft.style.colorMode !== 'custom') tagEditor.draft.style.color = categoryBrushColor(tagEditor.draft.category);
+        const resolvedColor = (tagEditor.draft.brushColorMode === 'custom' || tagEditor.draft.style?.colorMode === 'custom')
+          ? (tagEditor.draft.brushColor || tagEditor.draft.style?.color || '#d64b3b')
+          : categoryBrushColor(tagEditor.draft.category);
+        tagEditor.draft.style = {
+          colorMode: tagEditor.draft.brushColorMode || tagEditor.draft.style?.colorMode || 'category',
+          color: resolvedColor
+        };
+        tagEditor.draft.brushColor = resolvedColor;
+
+        if (tagEditor.draft.brushMode) {
+          tagEditor.draft.highlight ||= { points: [] };
+          tagEditor.draft.highlight.colorMode = tagEditor.draft.style.colorMode;
+          tagEditor.draft.highlight.color = resolvedColor;
+          tagEditor.draft.highlight.radius = tagEditor.draft.brushRadius;
+          if (tagEditor.draft.highlight.points.length) {
+            const item = annotationManager.items.get(tagEditor.tag.id);
+            if (item?.highlight) item.highlight.visible = false;
+            annotationManager.showBrushPreview(tagEditor.draft.highlight);
+          }
+        } else {
+          delete tagEditor.draft.highlight;
+          annotationManager.hideBrushPreview();
+        }
+
+        if (tagEditor.hasEditedAnchor && tagEditor.draft.position && tagEditor.draft.normal) {
+          const hasSurface = Boolean(tagEditor.draft.highlight?.points?.length);
+          annotationManager.showPreviewAt(tagEditor.draft.position, tagEditor.draft.normal, tagEditor.draft.lineLength, { hasSurface });
+        } else if (tagEditor.tag) {
+          if (typeof changes.lineLength === 'number') {
+            tagEditor.tag.lineLength = changes.lineLength;
+            annotationManager.update(sceneManager.camera);
+          }
+        }
       },
       onCancel: closeTagEditor,
       onEditLeaderLine: editLeaderLine,
       onEditAnchor: editTagAnchor,
-      anchorSelectionActive: tagEditor.repositioningAnchor,
-      hasEditedAnchor: tagEditor.hasEditedAnchor,
+      onClearSurface: () => {
+        delete tagEditor.draft.highlight;
+        const item = annotationManager.items.get(tagEditor.tag.id);
+        if (item?.highlight) item.highlight.visible = false;
+        annotationManager.hideBrushPreview();
+        renderTagDraft();
+        showToast('Namalovaná plocha byla vymazána.');
+      },
+      onAddCategory: () => manageCategories({ startAdding: true, selectForDraft: true }),
+      anchorSelectionActive: Boolean(tagEditor.repositioningAnchor),
+      hasEditedAnchor: Boolean(tagEditor.hasEditedAnchor),
       onSave: saveTagEditor
     });
     return;
@@ -1511,11 +1616,18 @@ function renderTagDraft() {
     categories: currentCategoryDefinitions(),
     onChange: (changes) => {
       Object.assign(tagDraft, changes);
-      if (tagDraft.brushColorMode !== 'custom') tagDraft.brushColor = tagDraft.brushCategoryColor || categoryBrushColor(tagDraft.category);
+      const resolvedColor = (tagDraft.brushColorMode === 'custom' || tagDraft.style?.colorMode === 'custom')
+        ? (tagDraft.brushColor || tagDraft.style?.color || '#d64b3b')
+        : (tagDraft.brushCategoryColor || categoryBrushColor(tagDraft.category));
+      tagDraft.brushColor = resolvedColor;
+      tagDraft.style = {
+        colorMode: tagDraft.brushColorMode || tagDraft.style?.colorMode || 'category',
+        color: resolvedColor
+      };
       if (tagDraft.brushMode) {
         tagDraft.highlight ||= { points: [] };
-        tagDraft.highlight.colorMode = tagDraft.brushColorMode;
-        tagDraft.highlight.color = tagDraft.brushColor;
+        tagDraft.highlight.colorMode = tagDraft.style.colorMode;
+        tagDraft.highlight.color = resolvedColor;
         tagDraft.highlight.radius = tagDraft.brushRadius;
         if (tagDraft.highlight.points.length) annotationManager.showBrushPreview(tagDraft.highlight);
       } else {
@@ -1523,19 +1635,33 @@ function renderTagDraft() {
         annotationManager.hideBrushPreview();
       }
       saveTagDraft();
-      if (tagDraft.position) annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength);
+      if (tagDraft.position) {
+        const hasSurface = Boolean(tagDraft.highlight?.points?.length);
+        annotationManager.showPreviewAt(tagDraft.position, tagDraft.normal, tagDraft.lineLength, { hasSurface });
+      }
     },
     onResetAnchor: () => {
       tagDraft.position = undefined;
       tagDraft.normal = undefined;
       delete tagDraft.highlight;
+      tagDraft.repositioningAnchor = false;
       annotationManager.hideBrushPreview();
       annotationManager.hidePreview();
       saveTagDraft();
       renderTagDraft();
     },
+    onEditAnchor: editDraftAnchor,
+    onClearSurface: () => {
+      delete tagDraft.highlight;
+      annotationManager.hideBrushPreview();
+      saveTagDraft();
+      renderTagDraft();
+      showToast('Namalovaná plocha byla vymazána.');
+    },
     onCancel: closeTagDraft,
     onAddCategory: () => manageCategories({ startAdding: true, selectForDraft: true }),
+    anchorSelectionActive: Boolean(tagDraft.repositioningAnchor),
+    hasEditedAnchor: Boolean(tagDraft.position),
     onSave: () => {
       if (!tagDraft?.position || !tagDraft.title.trim()) return;
       const saved = { ...tagDraft };
@@ -1550,10 +1676,14 @@ function renderTagDraft() {
       delete saved.brushMinRadius;
       delete saved.brushMaxRadius;
       delete saved.brushStep;
+      delete saved.selectedModuleId;
+      delete saved.moduleSearchQuery;
+      delete saved.moduleSystemFilter;
+      delete saved.repositioningAnchor;
       closeTagDraft();
       addTag(saved);
     }
-  }, true);
+  });
 }
 
 function updateTagDraftNotice() {
@@ -1562,7 +1692,7 @@ function updateTagDraftNotice() {
     return;
   }
   showPersistentNotice('tag-draft', tagDraft.brushMode
-    ? 'Nový štítek: nastavte údaje v panelu a tažením štětce vyberte plochu na modelu.'
+    ? 'Nový štítek: nastavte údaje v panelu, tažením štětce vyberte plochu a případně upravte bod na modelu.'
     : 'Nový štítek: nastavte údaje v panelu, najeďte na povrch a kliknutím vyberte ukotvení.');
 }
 
@@ -1587,33 +1717,75 @@ function editTag(tag) {
     return;
   }
   const limits = draftLineLimits(tag.lineLength);
+  const brushLimits = draftBrushLimits(tag.highlight?.radius);
   const sourceStyle = tag.style || tag.highlight;
+  const categoryColor = categoryBrushColor(tag.category);
+  const brushMode = Boolean(tag.highlight);
+  const brushColorMode = sourceStyle?.colorMode === 'custom' ? 'custom' : 'category';
+  const brushColor = sourceStyle?.color || categoryColor;
+  const brushRadius = Number(tag.highlight?.radius) || brushLimits.brushRadius;
+  const highlight = tag.highlight ? JSON.parse(JSON.stringify(tag.highlight)) : undefined;
+
   tagEditor = {
     tag,
+    repositioningAnchor: false,
+    hasEditedAnchor: false,
+    original: {
+      lineLength: tag.lineLength,
+      category: tag.category,
+      style: tag.style ? { ...tag.style } : undefined,
+      highlight: tag.highlight ? JSON.parse(JSON.stringify(tag.highlight)) : undefined,
+      position: tag.position ? [...tag.position] : undefined,
+      normal: tag.normal ? [...tag.normal] : undefined
+    },
     draft: {
       title: tag.title || '',
       category: tag.category || currentCategoryDefinitions()[0]?.id || 'obecne',
       description: tag.description || '',
+      selectedModuleId: tag.module?.id || (tag.module ? 'anatomy' : ''),
+      module: tag.module ? { ...tag.module } : undefined,
       ...limits,
       lineLength: tag.lineLength || limits.lineLength,
+      brushMode,
+      brushColorMode,
+      brushColor,
+      brushRadius,
+      ...brushLimits,
+      ...(highlight ? { highlight } : {}),
       style: {
-        colorMode: sourceStyle?.colorMode === 'custom' ? 'custom' : 'category',
-        color: sourceStyle?.color || categoryBrushColor(tag.category)
+        colorMode: brushColorMode,
+        color: brushColor
       },
-      highlight: tag.highlight,
       position: tag.position ? [...tag.position] : undefined,
       normal: tag.normal ? [...tag.normal] : undefined
     }
   };
   annotationManager.select(tag.id, { focus: false });
   annotationManager.hidePreview();
+  if (highlight) {
+    const item = annotationManager.items.get(tag.id);
+    if (item?.highlight) item.highlight.visible = false;
+    annotationManager.showBrushPreview(highlight);
+  } else {
+    annotationManager.hideBrushPreview();
+  }
   renderTagDraft();
   renderCurrentSidebar();
 }
 
 function closeTagEditor() {
+  if (tagEditor?.original && tagEditor.tag) {
+    Object.assign(tagEditor.tag, tagEditor.original);
+    if (!tagEditor.original.highlight) delete tagEditor.tag.highlight;
+    else tagEditor.tag.highlight = JSON.parse(JSON.stringify(tagEditor.original.highlight));
+    if (tagEditor.original.position) tagEditor.tag.position = [...tagEditor.original.position];
+    if (tagEditor.original.normal) tagEditor.tag.normal = [...tagEditor.original.normal];
+    annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
+    annotationManager.update(sceneManager.camera);
+  }
   tagEditor = undefined;
   annotationManager.hidePreview();
+  annotationManager.hideBrushPreview();
   renderTagDraft();
   renderCurrentSidebar();
 }
@@ -1631,16 +1803,40 @@ function editTagAnchor() {
 function saveTagEditor() {
   if (!tagEditor || !tagEditor.draft.title.trim()) return;
   const { tag, draft } = tagEditor;
+  const colorMode = draft.brushColorMode || draft.style?.colorMode || 'category';
+  const color = colorMode === 'custom'
+    ? (draft.brushColor || draft.style?.color || '#d64b3b')
+    : categoryBrushColor(draft.category);
+  const style = { colorMode, color };
+
+  let highlight = undefined;
+  if (draft.brushMode && draft.highlight?.points?.length) {
+    highlight = {
+      colorMode,
+      color,
+      radius: Number(draft.brushRadius || draft.highlight.radius),
+      points: draft.highlight.points.map((point) => ({
+        position: [...point.position],
+        normal: [...point.normal]
+      }))
+    };
+  }
+
   Object.assign(tag, {
     title: draft.title.trim(),
     category: draft.category,
     description: draft.description,
     lineLength: draft.lineLength,
-    style: { ...draft.style },
+    style,
+    ...(highlight ? { highlight } : {}),
+    ...(draft.module ? { module: { ...draft.module } } : {}),
     ...(draft.position && draft.normal ? { position: [...draft.position], normal: [...draft.normal] } : {})
   });
+  if (!highlight) delete tag.highlight;
+  if (!draft.module) delete tag.module;
   settings.categories.add(tag.category);
   settings.hiddenTags.delete(tag.id);
+  annotationManager.hideBrushPreview();
   annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
   annotationManager.setVisible(settings.categories);
   annotationManager.select(tag.id, { focus: false });
@@ -1802,11 +1998,22 @@ function manageCategories({ startAdding = false, selectForDraft = false } = {}) 
       settings.categoryDefinitions = currentCategoryDefinitions();
       if (selectForDraft && tagDraft) {
         tagDraft.category = categories.at(-1)?.id || tagDraft.category;
+        if (tagDraft.brushColorMode !== 'custom' && tagDraft.style?.colorMode !== 'custom') {
+          tagDraft.brushColor = categoryBrushColor(tagDraft.category);
+          if (tagDraft.style) tagDraft.style.color = tagDraft.brushColor;
+        }
         saveTagDraft();
+      } else if (selectForDraft && tagEditor) {
+        tagEditor.draft.category = categories.at(-1)?.id || tagEditor.draft.category;
+        if (tagEditor.draft.brushColorMode !== 'custom' && tagEditor.draft.style?.colorMode !== 'custom') {
+          const catColor = categoryBrushColor(tagEditor.draft.category);
+          tagEditor.draft.brushColor = catColor;
+          if (tagEditor.draft.style) tagEditor.draft.style.color = catColor;
+        }
       }
       annotationManager.setTags(currentModel.tags || [], { categories: currentCategoryDefinitions() });
       renderCurrentSidebar();
-      if (tagDraft) renderTagDraft();
+      if (tagDraft || tagEditor) renderTagDraft();
       showToast(`Společné kategorie uložil uživatel ${result.user.name}.`);
     }
   });
