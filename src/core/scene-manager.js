@@ -33,10 +33,11 @@ export class SceneManager {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = true;
     this.controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.ROTATE
+      RIGHT: THREE.MOUSE.PAN
     };
     this.controls.touches = {
       ONE: THREE.TOUCH.ROTATE,
@@ -97,6 +98,39 @@ export class SceneManager {
     this.grid.visible = false;
     this.scene.add(this.grid);
 
+    this.centerHelper = new THREE.Group();
+    this.centerHelper.name = 'Střed scény (střed otáčení)';
+    this.centerHelper.visible = false;
+
+    const axisLength = 1.0;
+    const centerMatX = new THREE.LineBasicMaterial({ color: '#ff4444', depthTest: false, transparent: true, opacity: 0.9 });
+    const centerMatY = new THREE.LineBasicMaterial({ color: '#44cc44', depthTest: false, transparent: true, opacity: 0.9 });
+    const centerMatZ = new THREE.LineBasicMaterial({ color: '#3388ff', depthTest: false, transparent: true, opacity: 0.9 });
+
+    const geoX = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-axisLength, 0, 0), new THREE.Vector3(axisLength, 0, 0)]);
+    const geoY = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -axisLength, 0), new THREE.Vector3(0, axisLength, 0)]);
+    const geoZ = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -axisLength), new THREE.Vector3(0, 0, axisLength)]);
+
+    const lineX = new THREE.Line(geoX, centerMatX);
+    const lineY = new THREE.Line(geoY, centerMatY);
+    const lineZ = new THREE.Line(geoZ, centerMatZ);
+    lineX.renderOrder = 999;
+    lineY.renderOrder = 999;
+    lineZ.renderOrder = 999;
+
+    const centerSphereGeo = new THREE.SphereGeometry(0.06, 16, 12);
+    const centerSphereMat = new THREE.MeshBasicMaterial({ color: '#ffbe00', depthTest: false, transparent: true, opacity: 0.95 });
+    const centerSphere = new THREE.Mesh(centerSphereGeo, centerSphereMat);
+    centerSphere.renderOrder = 1000;
+
+    const centerRingGeo = new THREE.RingGeometry(0.14, 0.17, 24);
+    const centerRingMat = new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.85 });
+    this.centerRing = new THREE.Mesh(centerRingGeo, centerRingMat);
+    this.centerRing.renderOrder = 1000;
+
+    this.centerHelper.add(lineX, lineY, lineZ, centerSphere, this.centerRing);
+    this.scene.add(this.centerHelper);
+
     this.resize = this.resize.bind(this);
     this.observer = new ResizeObserver(this.resize);
     this.observer.observe(container);
@@ -112,6 +146,13 @@ export class SceneManager {
       this.camera.position.lerpVectors(this.animation.fromPosition, this.animation.toPosition, eased);
       this.controls.target.lerpVectors(this.animation.fromTarget, this.animation.toTarget, eased);
       if (elapsed === 1) this.animation = null;
+    }
+    if (this.centerHelper?.visible) {
+      this.centerHelper.position.copy(this.controls.target);
+      const dist = this.camera.position.distanceTo(this.controls.target);
+      const scale = Math.max(dist * 0.08, 0.001);
+      this.centerHelper.scale.setScalar(scale);
+      if (this.centerRing) this.centerRing.quaternion.copy(this.camera.quaternion);
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
@@ -242,7 +283,7 @@ export class SceneManager {
 
   beginContentRotation(event) {
     if (this.rotationGizmoVisible() || this.navigationMode === 'orbit' || !this.modelRoot.children.length) return false;
-    if (event.button !== 0 && event.button !== 2) return false;
+    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey) return false;
     const point = this.contentTrackballPoint(event);
     if (!point) return false;
     this.animation = null;
@@ -442,9 +483,17 @@ export class SceneManager {
     });
   }
 
+  setSceneCenterVisible(visible) {
+    if (this.centerHelper) this.centerHelper.visible = Boolean(visible);
+  }
+
   dispose() {
     this.observer?.disconnect();
     this.clearModel();
+    if (this.centerHelper) {
+      this.scene.remove(this.centerHelper);
+      disposeObject(this.centerHelper);
+    }
     this.annotationRoot.clear();
     this.transformControls.detach();
     this.transformControls.dispose();

@@ -174,7 +174,7 @@ export function renderDashboard(host, models = [], options = {}) {
     </main>
     <dialog class="modal" id="upload-dialog">
       <form method="dialog" id="upload-form">
-        <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+        <button class="modal-close" type="button" data-close aria-label="Zavřít">${actionIconMarkup('cancel')}</button>
         <h2>Průvodce nahráním 3D modelu</h2><p>Po nahrání vznikne automaticky náhled a varianty S, M a originál. Podporované formáty: ${escapeHtml(uploadFormatLabel)}. Jeden soubor může mít nejvýše ${escapeHtml(uploadSizeLabel)}; najednou lze nahrát ${escapeHtml(uploadFileCountLabel)}.</p>
         <section class="upload-step"><p class="upload-step-title"><span>1</span> Základní údaje</p>
           <label>Název modelu<input name="title" required maxlength="120" placeholder="Např. Srdce – přední pohled" /></label>

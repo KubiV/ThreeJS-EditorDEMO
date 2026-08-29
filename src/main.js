@@ -14,6 +14,7 @@ import { showCategoryDialog, showModelInfoDialog } from './ui/dialogs.js';
 import { categoryDefinitions, renderSidebar } from './ui/sidebar.js';
 import { renderTagDraftPanel, renderTagEditorPanel } from './ui/tag-draft-panel.js';
 import { hidePersistentNotice, showPersistentNotice, showToast } from './ui/toast.js';
+import { initPanelResizing, attachLeftPanelResizer, attachSidebarResizer, syncSidebarCollapsedState } from './ui/panel-resizer.js';
 
 const app = document.querySelector('#app');
 const defaultSettings = () => ({
@@ -35,6 +36,10 @@ const defaultSettings = () => ({
   loadingStatus: 'Připravuji pracovní plochu…',
   editMode: false,
   canEdit: true,
+  labelArrangeMode: false,
+  globalTagDistanceSlider: 0,
+  globalTagDistanceOffset: 0,
+  showSceneCenter: false,
   modelPermissions: { canEdit: false, canDelete: false, canRegenerateThumbnail: false },
   wikiDirty: false,
   defaultViewDirty: false,
@@ -49,6 +54,7 @@ let wikiIndexProblem = '';
 let categoryCatalog = { article: '', categories: [], wikitext: '' };
 let currentModel;
 let selectedTag;
+let baseLineLengths = new Map();
 let settings = defaultSettings();
 let sceneManager;
 let annotationManager;
@@ -57,6 +63,9 @@ let ignoreNextClick = false;
 let brushStroke = null;
 let tagDraft;
 let tagEditor;
+let lastUsedModuleId = 'anatomy';
+let lastUsedModuleMode = 'structure';
+let lastUsedStructureFilter = '';
 let wikiConfig = {
   endpoint: '',
   pagePrefix: '',
@@ -516,10 +525,9 @@ function viewerMarkup() {
     </div>` : '';
   const modeControl = !embedded && wiki ? `
     <nav class="mode-switch" aria-label="Režim stránky">
-      <span class="mode-switch-label">Režim</span>
-      <button type="button" class="mode-tab ${settings.canEdit ? '' : 'is-active'}" ${settings.canEdit ? 'data-action="mode-toggle" data-mode="read"' : ''}>Čtení</button>
-      <button type="button" class="mode-tab ${settings.canEdit ? 'is-active' : ''}" ${settings.canEdit ? '' : 'data-action="mode-toggle" data-mode="edit"'}>Úpravy</button>
-      ${settings.canEdit ? `<button type="button" class="topbar-save" data-action="wiki-save" title="Uložit">${actionIconMarkup('save')}ULOŽIT</button>` : ''}
+      <button type="button" class="mode-tab ${settings.canEdit ? '' : 'is-active'}" ${settings.canEdit ? 'data-action="mode-toggle" data-mode="read"' : ''}>${actionIconMarkup('eye')}Čtení</button>
+      <button type="button" class="mode-tab ${settings.canEdit ? 'is-active' : ''}" ${settings.canEdit ? '' : 'data-action="mode-toggle" data-mode="edit"'}>${actionIconMarkup('edit')}Úpravy</button>
+      ${settings.canEdit ? `<button type="button" class="topbar-save" data-action="wiki-save" title="Uložit">${actionIconMarkup('save')}Uložit</button>` : ''}
     </nav>` : '';
   const topbarActions = embedded ? '' : `<nav class="topbar-actions"><button type="button" class="topbar-link" data-action="about">O 3D prohlížeči</button><button type="button" class="topbar-icon" data-action="user-settings" aria-label="Uživatelské nastavení" title="Uživatelské nastavení">${settingsIconMarkup()}</button>${wikiSessionIndicatorMarkup(wikiSessionUser, { userPageUrl: wikiUserPageUrl(), loginUrl: wikiConfig.loginUrl })}</nav>`;
   const toolbarActions = embedded
@@ -528,7 +536,7 @@ function viewerMarkup() {
   const viewportToolbar = toolbarActions ? `<div class="viewport-toolbar">${toolbarActions}</div>` : '';
   const navigationCube = `<div class="navigation-cube" role="group" aria-label="Navigační kostka: rychlé nastavení směru pohledu">
     <div class="navigation-cube-main"><button type="button" class="navigation-cube-face navigation-cube-top" data-nav-face="top" aria-label="Pohled shora" title="Pohled shora">Shora</button><button type="button" class="navigation-cube-face navigation-cube-front" data-nav-face="front" aria-label="Pohled zepředu" title="Pohled zepředu">Zepředu</button><button type="button" class="navigation-cube-face navigation-cube-right" data-nav-face="right" aria-label="Pohled zprava" title="Pohled zprava">Zprava</button><div class="navigation-cube-opposites"><button type="button" class="navigation-cube-bottom" data-nav-face="bottom" aria-label="Pohled zdola" title="Pohled zdola">Zdola</button><button type="button" class="navigation-cube-left" data-nav-face="left" aria-label="Pohled zleva" title="Pohled zleva">Zleva</button><button type="button" class="navigation-cube-back" data-nav-face="back" aria-label="Pohled zezadu" title="Pohled zezadu">Zezadu</button></div></div>
-    <button type="button" class="navigation-cube-reset" data-nav-reset aria-label="Resetovat polohu pohledu" title="Resetovat polohu pohledu">${actionIconMarkup('refresh')}Reset polohy</button>
+    <button type="button" class="navigation-cube-reset" data-nav-reset aria-label="Resetovat polohu pohledu" title="Resetovat polohu pohledu">${actionIconMarkup('refresh')}Reset</button>
   </div>`;
   const footerContent = `${embedded ? `<button class="footer-link" data-action="about">${actionIconMarkup('info')}O 3D prohlížeči</button>` : ''}${wikiSessionUser ? '' : '<span>Pro úpravy se přihlaste do MediaWiki.</span>'}${returnTo ? `<a class="footer-link" href="${escapeHtml(returnTo)}">${actionIconMarkup('back')}Zpět na článek</a>` : ''}`;
   app.innerHTML = `
@@ -569,7 +577,7 @@ async function openModel(model, tagId, lod = 'original') {
   settings.embeddedLod = embeddedLodFromUrl();
   settings.awaitingEmbeddedLoad = settings.embedded && embeddedAwaitLoadFromUrl();
   if (settings.embedded) settings.lod = settings.embeddedLod;
-  settings.categories = new Set((model.tags || []).map((tag) => tag.category));
+  settings.categories = new Set((model.tags || []).map((tag) => tag.category || 'obecne'));
   settings.categoryDefinitions = currentCategoryDefinitions();
   if (isWikiModel(model)) {
     settings.canEdit = false;
@@ -615,7 +623,9 @@ async function openModel(model, tagId, lod = 'original') {
   const labelLayer = document.querySelector('#annotation-layer');
   sceneManager = new SceneManager(canvas, (camera) => annotationManager?.update(camera));
   sceneManager.setNavigationMode(settings.navigationMode);
+  sceneManager.setSceneCenterVisible(settings.showSceneCenter);
   applySceneBackground();
+  initPanelResizing({ getSceneManager: () => sceneManager });
   annotationManager = new AnnotationManager(sceneManager, labelLayer, {
     onSelect: (tag) => {
       selectedTag = tag;
@@ -628,11 +638,13 @@ async function openModel(model, tagId, lod = 'original') {
           tagEditor.draft.lineLength = _tag.lineLength;
           renderTagDraft();
         }
+        baseLineLengths.set(_tag.id, _tag.lineLength - (settings.globalTagDistanceOffset || 0));
         persistModel();
         renderCurrentSidebar();
       }
     }
   });
+  annotationManager.setCanEdit(settings.canEdit);
   renderTagDraft();
   if (tagDraft) updateTagDraftNotice();
   attachViewportInteractions();
@@ -718,6 +730,7 @@ async function loadCurrentModel(model, tagId, lod = 'original', { requestId = ++
     applyMaterialSettings(sceneManager.modelRoot, settings);
     sceneManager.setClipping(settings);
     annotationManager.setTags(model.tags || [], { preserveCategories: false, categories: currentCategoryDefinitions() });
+    syncBaseLineLengths();
     if (model.camera) sceneManager.updateCameraState(model.camera, { applyModelQuaternion: !model.orientation?.quaternion });
     sceneManager.setRotationGizmoVisible(settings.rotationGizmoVisible);
     syncTagDraftToModel();
@@ -933,7 +946,7 @@ function saveDefaultView() {
   settings.defaultViewDirty = true;
   persistModel({ defaultView: true });
   renderCurrentSidebar();
-  showToast('Aktuální pohled je nastaven. Pro trvalé uložení klikněte nahoře na „ULOŽIT“.');
+  showToast('Aktuální pohled je nastaven. Pro trvalé uložení klikněte nahoře na „Uložit“.');
 }
 
 function clearDefaultView() {
@@ -944,7 +957,7 @@ function clearDefaultView() {
   sceneManager?.resetView();
   persistModel({ defaultView: true });
   renderCurrentSidebar();
-  showToast('Automatický pohled je připraven. Zapište změnu tlačítkem „ULOŽIT“ nahoře.');
+  showToast('Automatický pohled je připraven. Zapište změnu tlačítkem „Uložit“ nahoře.');
 }
 
 function toggleRotationGizmo() {
@@ -978,7 +991,7 @@ function saveDefaultOrientation() {
   settings.rotationGizmoVisible = false;
   sceneManager.setRotationGizmoVisible(false);
   renderCurrentSidebar();
-  showToast('Výchozí natočení tělesa je nastaveno. Pro trvalé uložení klikněte nahoře na „ULOŽIT“.');
+  showToast('Výchozí natočení tělesa je nastaveno. Pro trvalé uložení klikněte nahoře na „Uložit“.');
 }
 
 function clearDefaultOrientation() {
@@ -1059,6 +1072,7 @@ async function deleteCurrentModel() {
 function renderCurrentSidebar() {
   const host = document.querySelector('#sidebar-host');
   if (!host || !currentModel) return;
+  syncSidebarCollapsedState(host.classList.contains('is-collapsed'));
   renderSidebar(host, currentModel, selectedTag, {
     ...settings,
     tagDraftActive: Boolean(tagDraft),
@@ -1067,6 +1081,15 @@ function renderCurrentSidebar() {
     wikiArticleUrl
   }, {
     select: (id) => annotationManager.select(id),
+    editTag: (id) => {
+      const tag = currentModel.tags?.find((item) => item.id === id);
+      if (tag) editTag(tag);
+    },
+    deleteTag: (id) => {
+      const tag = currentModel.tags?.find((item) => item.id === id);
+      if (tag) deleteTag(tag);
+    },
+    adjustAllTagsDistance: (sliderValue, options) => adjustAllTagsDistance(sliderValue, options),
     category: (category, checked) => {
       if (checked) settings.categories.add(category);
       else settings.categories.delete(category);
@@ -1079,12 +1102,31 @@ function renderCurrentSidebar() {
       renderCurrentSidebar();
     },
     toggleTag: (id) => {
-      if (settings.hiddenTags.has(id)) settings.hiddenTags.delete(id);
-      else settings.hiddenTags.add(id);
+      const tag = currentModel.tags?.find((item) => item.id === id);
+      const category = tag?.category || 'obecne';
+      const isCategoryVisible = settings.categories?.has(category);
+      const isExplicitlyHidden = settings.hiddenTags?.has(id);
+      const isCurrentlyHidden = !isCategoryVisible || isExplicitlyHidden;
+
+      if (isCurrentlyHidden) {
+        settings.hiddenTags.delete(id);
+        if (!isCategoryVisible) {
+          settings.categories.add(category);
+          annotationManager.setVisible(settings.categories);
+        }
+      } else {
+        settings.hiddenTags.add(id);
+      }
       annotationManager.setHiddenTags(settings.hiddenTags);
       renderCurrentSidebar();
     },
     setting: (key, value) => {
+      if (key === 'showSceneCenter') {
+        settings.showSceneCenter = Boolean(value);
+        sceneManager?.setSceneCenterVisible(settings.showSceneCenter);
+        renderCurrentSidebar();
+        return;
+      }
       settings[key] = key === 'lod' ? value : key === 'wireframe' ? value : Number.isNaN(Number(value)) ? value : Number(value);
       if (['loadStrategy', 'lod', 'onDemandLod'].includes(key)) {
         settings[key] = key === 'lod' || key === 'onDemandLod' ? normalizedLod(value) : value;
@@ -1100,12 +1142,15 @@ function renderCurrentSidebar() {
     info: updateModelInfo,
     action: handleSidebarAction
   });
+  attachSidebarResizer();
 }
 
 function handleSidebarAction(action) {
   if (action === 'back') renderHub();
   if (action === 'collapse') {
-    document.querySelector('#sidebar-host').classList.toggle('is-collapsed');
+    const host = document.querySelector('#sidebar-host');
+    const collapsed = host?.classList.toggle('is-collapsed');
+    syncSidebarCollapsedState(collapsed);
     renderCurrentSidebar();
   }
   if (action === 'reset') {
@@ -1125,16 +1170,18 @@ function handleSidebarAction(action) {
   if (action === 'delete-model') deleteCurrentModel();
   if (action === 'edit-leader-line') editLeaderLine();
   if (action === 'show-all') {
-    annotationManager.showAll(true);
-    settings.categories = new Set((currentModel.tags || []).map((tag) => tag.category));
     settings.hiddenTags.clear();
+    settings.categories = new Set((currentModel.tags || []).map((tag) => tag.category || 'obecne'));
+    annotationManager.setVisible(settings.categories);
+    annotationManager.setHiddenTags(settings.hiddenTags);
     renderCurrentSidebar();
   }
   if (action === 'hide-all') {
-    annotationManager.showAll(false);
-    settings.categories.clear();
+    settings.hiddenTags = new Set((currentModel.tags || []).map((tag) => tag.id));
+    annotationManager.setHiddenTags(settings.hiddenTags);
     renderCurrentSidebar();
   }
+  if (action === 'toggle-label-arrange') toggleLabelArrangeMode();
   if (action === 'add-tag') openTagDraft();
   if (action === 'edit-tag' && selectedTag) editTag(selectedTag);
   if (action === 'delete-tag' && selectedTag) deleteTag(selectedTag);
@@ -1384,6 +1431,7 @@ function draftLineLimits(requestedLineLength) {
     Number.isFinite(requested) ? requested + lineStep : 0
   );
   return {
+    modelExtent: largest,
     minLineLength,
     lineLength: Number.isFinite(requested) ? Math.min(maxLineLength, Math.max(minLineLength, requested)) : defaultLength,
     maxLineLength,
@@ -1414,9 +1462,14 @@ function tagDraftStorageKey(model = currentModel) {
 function saveTagDraft() {
   const key = tagDraftStorageKey();
   if (!key || !tagDraft || !settings.canEdit) return;
-  const { id, title, category, description, position, normal, lineLength, brushMode, brushColorMode, brushColor, brushRadius, highlight } = tagDraft;
+  const { id, title, category, description, position, normal, lineLength, brushMode, brushColorMode, brushColor, brushRadius, highlight, selectedModuleId, moduleMode, moduleStructureFilter, moduleStructureSubQuery, moduleStructureTab, module } = tagDraft;
   try {
-    localStorage.setItem(key, JSON.stringify({ version: 2, id, title, category, description, position, normal, lineLength, brushMode, brushColorMode, brushColor, brushRadius, highlight }));
+    localStorage.setItem(key, JSON.stringify({
+      version: 3,
+      id, title, category, description, position, normal, lineLength,
+      brushMode, brushColorMode, brushColor, brushRadius, highlight,
+      selectedModuleId, moduleMode, moduleStructureFilter, moduleStructureSubQuery, moduleStructureTab, module
+    }));
   } catch {
     // The active editing session remains usable if browser storage is unavailable.
   }
@@ -1456,12 +1509,15 @@ function restoreTagDraft() {
   if (!key || !settings.canEdit || !isWikiModel()) return false;
   try {
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!saved || ![1, 2].includes(saved.version)) return false;
+    if (!saved || ![1, 2, 3].includes(saved.version)) return false;
     const limits = draftLineLimits(saved.lineLength);
     const brushLimits = draftBrushLimits(saved.brushRadius);
     const categories = currentCategoryDefinitions();
     const requestedLength = Number(saved.lineLength);
     const highlight = validDraftHighlight(saved.highlight);
+    if (saved.selectedModuleId !== undefined) lastUsedModuleId = saved.selectedModuleId;
+    if (saved.moduleMode) lastUsedModuleMode = saved.moduleMode;
+    if (saved.moduleStructureFilter) lastUsedStructureFilter = saved.moduleStructureFilter;
     tagDraft = {
       id: String(saved.id || `tag-${crypto.randomUUID()}`).slice(0, 100),
       title: String(saved.title || '').slice(0, 160),
@@ -1472,6 +1528,12 @@ function restoreTagDraft() {
       brushMode: Boolean(saved.brushMode || highlight),
       brushColorMode: highlight?.colorMode || (saved.brushColorMode === 'custom' ? 'custom' : 'category'),
       brushColor: highlight?.color || (/^#[0-9a-f]{6}$/i.test(String(saved.brushColor || '')) ? saved.brushColor : '#d64b3b'),
+      selectedModuleId: saved.selectedModuleId !== undefined ? saved.selectedModuleId : lastUsedModuleId,
+      moduleMode: saved.moduleMode || lastUsedModuleMode,
+      moduleStructureFilter: saved.moduleStructureFilter || lastUsedStructureFilter,
+      moduleStructureSubQuery: saved.moduleStructureSubQuery || '',
+      moduleStructureTab: saved.moduleStructureTab || 'direct',
+      module: saved.module,
       ...brushLimits,
       ...(highlight ? { highlight } : {}),
       ...limits,
@@ -1501,7 +1563,79 @@ function syncTagDraftToModel() {
   renderTagDraft();
 }
 
+function syncBaseLineLengths() {
+  baseLineLengths.clear();
+  (currentModel?.tags || []).forEach((tag) => {
+    const limits = draftLineLimits(tag.lineLength);
+    baseLineLengths.set(tag.id, Number(tag.lineLength) || limits.lineLength);
+  });
+}
+
+function calculateGlobalTagLength(baseLength, sliderValue, limits) {
+  const S = Number(sliderValue);
+  const minLength = limits.minLineLength;
+  if (!Number.isFinite(S) || S === 0) return Math.max(minLength, baseLength);
+
+  if (S < 0) {
+    // S in [-100, 0): non-linear collapse down to minLength (at model surface)
+    const u = Math.min(Math.max(-S / 100, 0), 1);
+    // Non-linear power factor: 1 - u^1.2. When u=1 (slider=-100), factor=0 -> length is minLength
+    const factor = Math.max(0, 1 - Math.pow(u, 1.2));
+    return minLength + (baseLength - minLength) * factor;
+  } else {
+    // S in (0, 100]: dynamically extend further from model using non-linear curve
+    const v = Math.min(Math.max(S / 100, 0), 1);
+    const modelExtent = limits.modelExtent || (limits.maxLineLength * 1.5);
+    // Max extra distance dynamically proportional to model size
+    const maxExtension = modelExtent * 1.25;
+    // Power curve (v^1.5): fine control near 0, large extension towards 100
+    const extra = maxExtension * Math.pow(v, 1.5);
+    return baseLength + extra;
+  }
+}
+
+function adjustAllTagsDistance(sliderValue, { transient = false } = {}) {
+  if (!currentModel?.tags?.length) return;
+  const limits = draftLineLimits();
+  settings.globalTagDistanceSlider = Number(sliderValue) || 0;
+
+  currentModel.tags.forEach((tag) => {
+    let base = baseLineLengths.get(tag.id);
+    if (base === undefined) {
+      base = Number(tag.lineLength) || limits.lineLength;
+      baseLineLengths.set(tag.id, base);
+    }
+    const newLength = calculateGlobalTagLength(base, sliderValue, limits);
+    tag.lineLength = newLength;
+    if (tagEditor?.tag?.id === tag.id) {
+      tagEditor.draft.lineLength = newLength;
+    }
+  });
+
+  annotationManager?.update(sceneManager.camera);
+  if (!transient) {
+    persistModel();
+    if (tagEditor) renderTagDraft();
+  }
+}
+
+function toggleLabelArrangeMode(force) {
+  const next = force !== undefined ? Boolean(force) : !settings.labelArrangeMode;
+  settings.labelArrangeMode = next;
+  annotationManager?.setArrangeMode(next);
+  if (next) {
+    showPersistentNotice('label-arrange', 'Režim posouvání štítků je aktivní. Můžete libovolně přetahovat popisky a zároveň otáčet modelem.', 'info', {
+      label: 'Ukončit posouvání',
+      onClick: () => toggleLabelArrangeMode(false)
+    });
+  } else {
+    hidePersistentNotice('label-arrange');
+  }
+  renderCurrentSidebar();
+}
+
 function openTagDraft() {
+  toggleLabelArrangeMode(false);
   const limits = draftLineLimits();
   const brushLimits = draftBrushLimits();
   const categories = currentCategoryDefinitions();
@@ -1515,6 +1649,10 @@ function openTagDraft() {
     brushMode: false,
     brushColorMode: 'category',
     brushColor: categoryBrushColor(categories[0]?.id),
+    selectedModuleId: lastUsedModuleId,
+    moduleMode: lastUsedModuleMode,
+    moduleStructureFilter: lastUsedStructureFilter,
+    moduleStructureTab: 'direct',
     ...brushLimits,
     ...limits
   };
@@ -1553,8 +1691,12 @@ function renderTagDraft() {
   if (tagEditor) {
     renderTagEditorPanel(host, tagEditor.draft, {
       categories: currentCategoryDefinitions(),
+      existingTags: currentModel?.tags || [],
       onChange: (changes) => {
         Object.assign(tagEditor.draft, changes);
+        if (changes.selectedModuleId !== undefined) lastUsedModuleId = changes.selectedModuleId;
+        if (changes.moduleMode) lastUsedModuleMode = changes.moduleMode;
+        if (changes.moduleStructureFilter !== undefined) lastUsedStructureFilter = changes.moduleStructureFilter;
         const resolvedColor = (tagEditor.draft.brushColorMode === 'custom' || tagEditor.draft.style?.colorMode === 'custom')
           ? (tagEditor.draft.brushColor || tagEditor.draft.style?.color || '#d64b3b')
           : categoryBrushColor(tagEditor.draft.category);
@@ -1605,6 +1747,7 @@ function renderTagDraft() {
       hasEditedAnchor: Boolean(tagEditor.hasEditedAnchor),
       onSave: saveTagEditor
     });
+    attachLeftPanelResizer();
     return;
   }
   if (!tagDraft) {
@@ -1614,8 +1757,12 @@ function renderTagDraft() {
   updateTagDraftNotice();
   renderTagDraftPanel(host, tagDraft, {
     categories: currentCategoryDefinitions(),
+    existingTags: currentModel?.tags || [],
     onChange: (changes) => {
       Object.assign(tagDraft, changes);
+      if (changes.selectedModuleId !== undefined) lastUsedModuleId = changes.selectedModuleId;
+      if (changes.moduleMode) lastUsedModuleMode = changes.moduleMode;
+      if (changes.moduleStructureFilter !== undefined) lastUsedStructureFilter = changes.moduleStructureFilter;
       const resolvedColor = (tagDraft.brushColorMode === 'custom' || tagDraft.style?.colorMode === 'custom')
         ? (tagDraft.brushColor || tagDraft.style?.color || '#d64b3b')
         : (tagDraft.brushCategoryColor || categoryBrushColor(tagDraft.category));
@@ -1677,6 +1824,10 @@ function renderTagDraft() {
       delete saved.brushMaxRadius;
       delete saved.brushStep;
       delete saved.selectedModuleId;
+      delete saved.moduleMode;
+      delete saved.moduleStructureFilter;
+      delete saved.moduleStructureSubQuery;
+      delete saved.moduleStructureTab;
       delete saved.moduleSearchQuery;
       delete saved.moduleSystemFilter;
       delete saved.repositioningAnchor;
@@ -1684,6 +1835,7 @@ function renderTagDraft() {
       addTag(saved);
     }
   });
+  attachLeftPanelResizer();
 }
 
 function updateTagDraftNotice() {
@@ -1704,6 +1856,7 @@ function addTag(tag) {
   settings.categories.add(tag.category);
   settings.hiddenTags.delete(tag.id);
   annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
+  syncBaseLineLengths();
   annotationManager.setVisible(settings.categories);
   annotationManager.select(tag.id, { focus: false });
   persistModel();
@@ -1716,6 +1869,10 @@ function editTag(tag) {
     showToast('Nejdříve dokončete nebo zrušte právě vytvářený štítek.', 'error');
     return;
   }
+  if (tagEditor && tagEditor.tag.id !== tag.id) {
+    closeTagEditor();
+  }
+  toggleLabelArrangeMode(false);
   const limits = draftLineLimits(tag.lineLength);
   const brushLimits = draftBrushLimits(tag.highlight?.radius);
   const sourceStyle = tag.style || tag.highlight;
@@ -1850,9 +2007,16 @@ function saveTagEditor() {
 
 function deleteTag(tag) {
   if (!currentModel || !window.confirm(`Opravdu odstranit štítek „${tag.title}“?`)) return;
+  if (tagEditor?.tag?.id === tag.id) {
+    tagEditor = undefined;
+    annotationManager.hidePreview();
+    annotationManager.hideBrushPreview();
+    renderTagDraft();
+  }
   currentModel.tags = (currentModel.tags || []).filter((item) => item.id !== tag.id);
-  selectedTag = undefined;
+  if (selectedTag?.id === tag.id) selectedTag = undefined;
   annotationManager.setTags(currentModel.tags, { categories: currentCategoryDefinitions() });
+  syncBaseLineLengths();
   persistModel();
   renderCurrentSidebar();
   showToast('Štítek byl odstraněn.');
@@ -1863,7 +2027,7 @@ function updateWikiSaveControl() {
   if (!button) return;
   const pending = settings.wikiDirty;
   button.disabled = wikiSaveInFlight;
-  button.innerHTML = `${actionIconMarkup('save')}${wikiSaveInFlight ? 'UKLÁDÁNÍ…' : 'ULOŽIT'}`;
+  button.innerHTML = `${actionIconMarkup('save')}${wikiSaveInFlight ? 'Ukládání…' : 'Uložit'}`;
   button.title = wikiSaveInFlight ? 'Ukládání…' : 'Uložit';
   button.toggleAttribute('data-dirty', pending);
   button.setAttribute('aria-busy', String(wikiSaveInFlight));

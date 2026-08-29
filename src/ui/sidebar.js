@@ -92,7 +92,6 @@ function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, act
   const tags = model.tags || [];
   const categoryById = new Map(definitions.map((category) => [category.id, category]));
   const categoryIds = [...new Set(tags.map((tag) => tag.category || 'obecne'))];
-  const visibleTags = tags.filter((tag) => state.categories.has(tag.category || 'obecne'));
   const panelMode = state.embeddedPanelMode === 'detail' ? 'detail' : 'list';
   const categoryFilters = categoryIds.map((id) => {
     const category = categoryById.get(id);
@@ -100,36 +99,84 @@ function renderEmbeddedSidebar(host, model, selectedTag, definitions, state, act
     const count = tags.filter((tag) => (tag.category || 'obecne') === id).length;
     return `<label title="${escapeHtml(category?.description || '')}"><input type="checkbox" data-category="${escapeHtml(id)}" aria-label="Zobrazit kategorii ${escapeHtml(category?.name || id)}" ${state.categories.has(id) ? 'checked' : ''}><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i><span>${escapeHtml(category?.name || id)}</span><small>${count}</small></label>`;
   }).join('');
-  const selectedVisible = selectedTag && visibleTags.some((tag) => tag.id === selectedTag.id) ? selectedTag : undefined;
+  const selectedVisible = selectedTag ? tags.find((tag) => tag.id === selectedTag.id) : undefined;
+  const isSelectedVisibleHidden = selectedVisible ? (!state.categories.has(selectedVisible.category || 'obecne') || state.hiddenTags?.has(selectedVisible.id)) : false;
   const tagGroups = categoryIds
     .filter((id) => state.categories.has(id))
     .map((id) => {
       const category = categoryById.get(id);
       const color = category?.color || categoryColor(category?.name || id);
-      const categoryTags = visibleTags.filter((tag) => (tag.category || 'obecne') === id);
+      const categoryTags = tags.filter((tag) => (tag.category || 'obecne') === id);
       if (!categoryTags.length) return '';
-      return `<section class="embed-tag-group"><h2><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}<small>${categoryTags.length}</small></h2><div>${categoryTags.map((tag) => {
-        const taBadge = tag.module?.termId ? `<em class="surface-tag-badge ta-badge" title="Terminologia Anatomica: ${escapeHtml(tag.module.termId)}">${escapeHtml(tag.module.termId)}</em>` : '';
-        return `<button type="button" class="embed-tag-item ${tag.id === selectedVisible?.id ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span>${escapeHtml(tag.title)}${taBadge}</span><span aria-hidden="true">→</span></button>`;
-      }).join('')}</div></section>`;
+      return `<section class="embed-tag-group">
+        <h2><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(category?.name || id)}<small>${categoryTags.length}</small></h2>
+        <div class="embed-tag-list">${categoryTags.map((tag) => {
+          const isCategoryVisible = state.categories?.has(tag.category || 'obecne');
+          const isExplicitlyHidden = state.hiddenTags?.has(tag.id);
+          const isHidden = !isCategoryVisible || isExplicitlyHidden;
+          const isSelected = selectedTag?.id === tag.id;
+          const visualStyle = tag.style || tag.highlight;
+          const tagColor = visualStyle?.colorMode === 'custom' ? visualStyle.color : color;
+          const taBadge = tag.module?.termId ? `<em class="surface-tag-badge ta-badge" title="Terminologia Anatomica: ${escapeHtml(tag.module.termId)}">${escapeHtml(tag.module.termId)}</em>` : '';
+          return `<div class="embed-tag-row ${isHidden ? 'is-hidden' : ''}">
+            <button type="button" class="embed-tag-item ${isSelected ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}" title="${escapeHtml(tag.title)}">
+              <span class="tag-dot" style="--category-color:${escapeHtml(tagColor)}"></span>
+              <span class="embed-tag-title">${escapeHtml(tag.title)}${taBadge}</span>
+            </button>
+            <button type="button" class="small-button tag-visibility embed-tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${isHidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${isHidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">
+              ${actionIconMarkup(isHidden ? 'eye' : 'eyeOff')}
+            </button>
+          </div>`;
+        }).join('')}</div>
+      </section>`;
     }).join('');
   const embeddedModuleInfo = renderTagModuleBadge(selectedVisible?.module);
   const panelContent = panelMode === 'list'
     ? `<section class="embed-tag-groups" aria-label="Seznam štítků podle kategorií">${tagGroups || `<p class="embed-empty-note">${tags.length ? 'Vyberte alespoň jednu kategorii.' : 'Model nemá žádné popisky.'}</p>`}</section>`
-    : `<section class="embed-description ${selectedVisible ? '' : 'is-empty'}" aria-live="polite">${selectedVisible ? `<h2>${escapeHtml(selectedVisible.title)}</h2><p class="embed-category">${escapeHtml(categoryName(selectedVisible.category, definitions))}</p>${embeddedModuleInfo}<div class="wikitext">${renderWikitext(selectedVisible.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Klikněte na štítek přímo v 3D modelu. Jeho popisek se zobrazí zde.</p>'}</section>`;
+    : `<section class="embed-description ${selectedVisible ? '' : 'is-empty'}" aria-live="polite">
+        ${selectedVisible ? `
+          <div class="embed-description-header">
+            <div>
+              <h2>${escapeHtml(selectedVisible.title)}</h2>
+              <p class="embed-category">${escapeHtml(categoryName(selectedVisible.category, definitions))}</p>
+              ${embeddedModuleInfo}
+            </div>
+            <button type="button" class="small-button tag-visibility embed-tag-visibility" data-toggle-tag="${escapeHtml(selectedVisible.id)}" aria-label="${isSelectedVisibleHidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(selectedVisible.title)}" title="${isSelectedVisibleHidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">
+              ${actionIconMarkup(isSelectedVisibleHidden ? 'eye' : 'eyeOff')}
+            </button>
+          </div>
+          <div class="wikitext">${renderWikitext(selectedVisible.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>
+        ` : '<p>Klikněte na štítek v seznamu nebo přímo v 3D modelu. Jeho popisek se zobrazí zde.</p>'}
+      </section>`;
   host.innerHTML = `
     <aside class="embed-sidebar" aria-label="Popisky modelu">
-      <p class="eyebrow">3D POPISKY</p>
+      <div class="embed-sidebar-header">
+        <p class="eyebrow">3D POPISKY</p>
+        <div class="embed-tag-tools">
+          <button type="button" class="small-button" data-action="show-all" title="Zobrazit všechny štítky">${actionIconMarkup('eye')}Zobrazit vše</button>
+          <button type="button" class="small-button" data-action="hide-all" title="Skrýt všechny štítky">${actionIconMarkup('eyeOff')}Skrýt vše</button>
+        </div>
+      </div>
       ${categoryFilters ? `<fieldset class="embed-category-filters"><legend>Kategorie</legend><div>${categoryFilters}</div></fieldset>` : ''}
-      <div class="embed-panel-switch" role="group" aria-label="Obsah pravého panelu"><button type="button" data-embedded-mode="list" class="${panelMode === 'list' ? 'is-active' : ''}" aria-pressed="${panelMode === 'list'}">${actionIconMarkup('list')}Seznam štítků</button><button type="button" data-embedded-mode="detail" class="${panelMode === 'detail' ? 'is-active' : ''}" aria-pressed="${panelMode === 'detail'}">${actionIconMarkup('info')}Popisek štítku</button></div>
+      <div class="embed-panel-switch" role="group" aria-label="Obsah pravého panelu">
+        <button type="button" data-embedded-mode="list" class="${panelMode === 'list' ? 'is-active' : ''}" aria-pressed="${panelMode === 'list'}">${actionIconMarkup('list')}Seznam štítků</button>
+        <button type="button" data-embedded-mode="detail" class="${panelMode === 'detail' ? 'is-active' : ''}" aria-pressed="${panelMode === 'detail'}">${actionIconMarkup('info')}Popisek štítku</button>
+      </div>
       ${panelContent}
     </aside>`;
   host.querySelectorAll('[data-tag]').forEach((button) => button.addEventListener('click', () => actions.select(button.dataset.tag)));
+  host.querySelectorAll('[data-toggle-tag]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    actions.toggleTag(button.dataset.toggleTag);
+  }));
   host.querySelectorAll('[data-category]').forEach((input) => input.addEventListener('change', () => {
     actions.category(input.dataset.category, input.checked);
   }));
   host.querySelectorAll('[data-embedded-mode]').forEach((button) => button.addEventListener('click', () => {
     actions.embeddedMode(button.dataset.embeddedMode);
+  }));
+  host.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => {
+    actions.action(button.dataset.action);
   }));
 }
 
@@ -152,9 +199,15 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
     const category = categoryById.get(tag.category);
     const categoryColorValue = category?.color || categoryColor(categoryName(tag.category, definitions));
     const color = (tag.style || tag.highlight)?.colorMode === 'custom' ? (tag.style || tag.highlight).color : categoryColorValue;
-    const hidden = state.hiddenTags?.has(tag.id);
+    const isCategoryVisible = state.categories?.has(tag.category || 'obecne');
+    const isExplicitlyHidden = state.hiddenTags?.has(tag.id);
+    const hidden = !isCategoryVisible || isExplicitlyHidden;
     const taBadge = tag.module?.termId ? `<em class="surface-tag-badge ta-badge" title="Terminologia Anatomica: ${escapeHtml(tag.module.termId)}">${escapeHtml(tag.module.termId)}</em>` : '';
-    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}${tag.highlight ? '<em class="surface-tag-badge">Plocha</em>' : ''}${taBadge}</small></span></button><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${actionIconMarkup(hidden ? 'eye' : 'eyeOff')}${hidden ? 'Zobrazit' : 'Skrýt'}</button></div>`;
+    const editActions = editable ? `
+      <button class="small-button" data-edit-tag="${escapeHtml(tag.id)}" aria-label="Upravit štítek ${escapeHtml(tag.title)}" title="Upravit štítek">${actionIconMarkup('edit')}</button>
+      <button class="small-button small-button-danger" data-delete-tag="${escapeHtml(tag.id)}" aria-label="Smazat štítek ${escapeHtml(tag.title)}" title="Smazat štítek">${actionIconMarkup('delete')}</button>
+    ` : '';
+    return `<div class="tag-row ${hidden ? 'is-hidden' : ''}"><button class="tag-item ${tag.id === selectedId ? 'is-active' : ''}" data-tag="${escapeHtml(tag.id)}"><span class="tag-dot" style="--category-color:${escapeHtml(color)}"></span><span><b>${escapeHtml(tag.title)}</b><small><i class="category-swatch" style="--category-color:${escapeHtml(color)}"></i>${escapeHtml(categoryName(tag.category, definitions))}${tag.highlight ? '<em class="surface-tag-badge">Plocha</em>' : ''}${taBadge}</small></span></button><div class="tag-row-actions"><button class="small-button tag-visibility" data-toggle-tag="${escapeHtml(tag.id)}" aria-label="${hidden ? 'Zobrazit' : 'Skrýt'} štítek ${escapeHtml(tag.title)}" title="${hidden ? 'Zobrazit štítek' : 'Skrýt štítek'}">${actionIconMarkup(hidden ? 'eye' : 'eyeOff')}</button>${editActions}</div></div>`;
   }).join('');
   const smallInfo = model.variantInfo?.small || model.variantInfo?.low;
   const mediumInfo = model.variantInfo?.medium;
@@ -191,13 +244,16 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
   const defaultViewDisabled = state.modelReady ? '' : 'disabled';
   const defaultViewSaveDisabled = editable && state.modelReady ? '' : 'disabled';
   const defaultViewGuidance = editable
-    ? `<ol class="default-view-steps"><li>${state.modelReady ? 'Nastavte si model myší.' : 'Počkejte na dokončení načítání modelu.'}</li><li>Klikněte na „Nastavit aktuální pohled“.</li><li>Klikněte nahoře na „ULOŽIT“.</li></ol>`
+    ? `<ol class="default-view-steps"><li>${state.modelReady ? 'Nastavte si model myší.' : 'Počkejte na dokončení načítání modelu.'}</li><li>Klikněte na „Nastavit aktuální pohled“.</li><li>Klikněte nahoře na „Uložit“.</li></ol>`
     : '<p class="setting-note">Dočasné otočení tělesa při prohlížení nemění jeho definici. Pro uložení výchozího natočení se přepněte do režimu Úpravy.</p>';
   const defaultViewPanel = isAdvanced ? `
     <details class="panel-section default-view-section collapsible-section">${collapsibleHeading('default-view', 'Výchozí pohled', defaultViewStatus)}
       <p class="setting-note">${hasCustomDefaultView ? 'Při otevření se použije vlastní poloha kamery uložená v definici tohoto 3D modelu.' : 'Při otevření se model automaticky zobrazí celý.'}</p>
       <div class="default-view-actions"><button type="button" class="small-button" data-action="fit-model" ${defaultViewDisabled}>${actionIconMarkup('fit')}Zobrazit celý model</button>${editable ? `<button type="button" class="small-button small-button-primary" data-action="save-default-view" ${defaultViewSaveDisabled}>${actionIconMarkup('camera')}Nastavit aktuální pohled</button>` : ''}${hasCustomDefaultView && editable ? `<button type="button" class="small-button" data-action="clear-default-view" ${defaultViewSaveDisabled}>${actionIconMarkup('refresh')}Vrátit automatický pohled</button>` : ''}</div>
-      ${state.defaultViewDirty ? '<p class="default-view-pending" role="status">Aktuální pohled je vybrán. Dokončete změnu tlačítkem „ULOŽIT“ v horní liště.</p>' : ''}
+      <div class="default-view-toggle">
+        <label><input type="checkbox" data-setting="showSceneCenter" ${state.showSceneCenter ? 'checked' : ''}><span>Zobrazit střed scény (střed otáčení)</span></label>
+      </div>
+      ${state.defaultViewDirty ? '<p class="default-view-pending" role="status">Aktuální pohled je vybrán. Dokončete změnu tlačítkem „Uložit“ v horní liště.</p>' : ''}
       ${defaultViewGuidance}
     </details>` : '';
   const hasCustomOrientation = Boolean(model.orientation?.quaternion?.length === 4);
@@ -210,7 +266,7 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
       <p class="setting-note">Natočení patří přímo k tělesu, ne ke kameře. Pomocí barevných kruhů otáčejte kolem světových os X, Y a Z.</p>
       ${editable ? `<div class="default-view-actions"><button type="button" class="small-button small-button-primary" data-action="toggle-rotation-gizmo" ${orientationDisabled}>${actionIconMarkup('rotate')}${state.rotationGizmoVisible ? 'Skrýt kruhy otáčení' : 'Upravit natočení kruhy'}</button><button type="button" class="small-button" data-action="save-default-orientation" ${orientationDisabled}>${actionIconMarkup('save')}Uložit aktuální natočení</button>${hasCustomOrientation ? `<button type="button" class="small-button" data-action="clear-default-orientation" ${orientationDisabled}>${actionIconMarkup('refresh')}Vrátit výchozí natočení</button>` : ''}</div>` : '<p class="setting-note">Pro změnu výchozího natočení se přepněte do režimu Úpravy.</p>'}
       ${state.rotationGizmoVisible ? '<p class="default-view-pending" role="status">Kruhy jsou aktivní. Tažením za červený, zelený nebo modrý kruh natočíte těleso.</p>' : ''}
-      ${state.defaultOrientationDirty ? '<p class="default-view-pending" role="status">Natočení je připraveno. Dokončete změnu tlačítkem „ULOŽIT“ v horní liště.</p>' : ''}
+      ${state.defaultOrientationDirty ? '<p class="default-view-pending" role="status">Natočení je připraveno. Dokončete změnu tlačítkem „Uložit“ v horní liště.</p>' : ''}
     </details>` : '';
   const appearancePanel = isAdvanced ? `
     <details class="panel-section model-appearance is-advanced collapsible-section">${collapsibleHeading('model-appearance', 'Vzhled modelu')}<div class="settings appearance-settings">
@@ -222,7 +278,7 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
       <label>Průřez (osa X)<input type="range" data-appearance="clipX" min="-100" max="100" value="${appearance.clipX}" ${appearanceDisabled}></label>
       <label>Průřez (osa Y)<input type="range" data-appearance="clipY" min="-100" max="100" value="${appearance.clipY}" ${appearanceDisabled}></label>
       <label>Průřez (osa Z)<input type="range" data-appearance="clipZ" min="-100" max="100" value="${appearance.clipZ}" ${appearanceDisabled}></label>
-    </div><p class="setting-note">${editable ? 'Změny uložíte tlačítkem „ULOŽIT“ v horní liště.' : 'Vzhled lze upravit po přepnutí na Úpravy.'}</p></details>` : '';
+    </div><p class="setting-note">${editable ? 'Změny uložíte tlačítkem „Uložit“ v horní liště.' : 'Vzhled lze upravit po přepnutí na Úpravy.'}</p></details>` : '';
   const categoryFilters = categories.map((id) => {
     const category = categoryById.get(id);
     const color = category?.color || categoryColor(category?.name || id);
@@ -231,9 +287,26 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
   const sidebarModuleDetail = renderTagModuleBadge(selectedTag?.module);
   host.innerHTML = `
     <aside class="sidebar ${collapsed ? 'is-collapsed' : ''}">
-      <div class="sidebar-top"><button class="icon-button" data-action="back" title="Zpět na 3D rozcestník" aria-label="Zpět na 3D rozcestník">←</button><div><strong>${escapeHtml(model.title)}</strong><small>${escapeHtml(model.article || '3D model')}</small></div><button class="icon-button sidebar-toggle" data-action="collapse" title="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}" aria-label="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}">${collapsed ? '⌄' : '⌃'}</button></div>
+      <div class="resize-handle resize-handle-sidebar-left" aria-hidden="true" title="Změnit šířku panelu"></div>
+      <div class="resize-handle resize-handle-sidebar-bottom" aria-hidden="true" title="Změnit výšku panelu"></div>
+      <div class="resize-handle resize-handle-sidebar-corner" aria-hidden="true" title="Změnit rozměry panelu"></div>
+      <div class="sidebar-top"><button class="icon-button" data-action="back" title="Zpět na 3D rozcestník" aria-label="Zpět na 3D rozcestník">${actionIconMarkup('back')}</button><div class="sidebar-title-wrap"><p class="eyebrow">${escapeHtml(model.article || '3D MODEL')}</p><h2>${escapeHtml(model.title)}</h2></div><button class="icon-button sidebar-toggle" data-action="collapse" title="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}" aria-label="${collapsed ? 'Rozbalit boční panel' : 'Sbalit boční panel'}">${actionIconMarkup(collapsed ? 'chevronDown' : 'chevronUp')}</button></div>
       <div class="sidebar-scroll">
-        <section class="panel-section tag-section"><div class="panel-heading"><h2>Štítky a popisky</h2><span>${model.tags?.length || 0}</span></div>${editable && !state.tagDraftActive ? `<button type="button" class="tag-draft-launcher" data-action="add-tag">${actionIconMarkup('add')}Přidat štítek</button>` : ''}<div class="tag-tools"><button class="small-button" data-action="show-all">${actionIconMarkup('eye')}Zobrazit vše</button><button class="small-button" data-action="hide-all">${actionIconMarkup('eyeOff')}Skrýt vše</button>${editable ? `<button class="small-button" data-action="add-category">${actionIconMarkup('add')}Kategorie</button><button class="small-button" data-action="manage-categories">${actionIconMarkup('edit')}Správa</button>` : ''}</div>
+        <section class="panel-section tag-section"><div class="panel-heading"><h2>Štítky a popisky</h2><span>${model.tags?.length || 0}</span></div>${editable && !state.tagDraftActive ? `
+          <button type="button" class="tag-draft-launcher" data-action="add-tag">${actionIconMarkup('add')}Přidat štítek</button>
+          <button type="button" class="tag-arrange-launcher ${state.labelArrangeMode ? 'is-active' : ''}" data-action="toggle-label-arrange" title="${state.labelArrangeMode ? 'Ukončit posouvání štítků' : 'Posouvat a rozmísťovat plovoucí štítky na modelu'}">${actionIconMarkup('move')}${state.labelArrangeMode ? 'Ukončit posouvání štítků' : 'Posouvat / rozmístit štítky'}</button>
+          ${(model.tags || []).length > 0 ? `
+            <div class="tag-global-distance-wrap">
+              <label class="tag-global-distance-label">
+                <span class="tag-global-distance-title">
+                  <span>Vzdálenost všech štítků</span>
+                  <output class="tag-global-distance-value" data-global-distance-output>${state.globalTagDistanceSlider ? (state.globalTagDistanceSlider > 0 ? `+${state.globalTagDistanceSlider} %` : `${state.globalTagDistanceSlider} %`) : '0 %'}</output>
+                </span>
+                <input type="range" data-action="adjust-global-tag-distance" min="-100" max="100" step="1" value="${state.globalTagDistanceSlider || 0}" aria-label="Změnit vzdálenost všech štítků od modelu">
+              </label>
+            </div>
+          ` : ''}
+        ` : ''}<div class="tag-tools"><button class="small-button" data-action="show-all">${actionIconMarkup('eye')}Zobrazit vše</button><button class="small-button" data-action="hide-all">${actionIconMarkup('eyeOff')}Skrýt vše</button>${editable ? `<button class="small-button" data-action="add-category">${actionIconMarkup('add')}Kategorie</button><button class="small-button" data-action="manage-categories">${actionIconMarkup('edit')}Správa</button>` : ''}</div>
         ${categoryFilters ? `<p class="tag-visibility-heading">Zobrazení podle kategorií</p><div class="category-filters">${categoryFilters}</div>` : ''}
         <div class="tag-list">${tagList || '<p class="empty-note">Zatím nejsou vloženy žádné štítky.</p>'}</div></section>
         <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><div><h2>${escapeHtml(selectedTag.title)}</h2>${sidebarModuleDetail}</div>${editable ? `<div class="description-actions"><button class="small-button" data-action="edit-tag">${actionIconMarkup('edit')}Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">${actionIconMarkup('delete')}Odstranit</button></div>` : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
@@ -251,11 +324,41 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
 
   host.querySelectorAll('[data-tag]').forEach((button) => button.addEventListener('click', () => actions.select(button.dataset.tag)));
   host.querySelectorAll('[data-toggle-tag]').forEach((button) => button.addEventListener('click', () => actions.toggleTag(button.dataset.toggleTag)));
+  host.querySelectorAll('[data-edit-tag]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    actions.editTag?.(button.dataset.editTag);
+  }));
+  host.querySelectorAll('[data-delete-tag]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    actions.deleteTag?.(button.dataset.deleteTag);
+  }));
   host.querySelectorAll('[data-category]').forEach((input) => input.addEventListener('change', () => actions.category(input.dataset.category, input.checked)));
-  host.querySelectorAll('[data-setting]').forEach((input) => input.addEventListener('input', () => actions.setting(input.dataset.setting, input.type === 'checkbox' ? input.checked : input.value)));
+  host.querySelectorAll('[data-setting]').forEach((input) => {
+    const eventName = input.matches('input[type="checkbox"]') ? 'change' : 'input';
+    input.addEventListener(eventName, () => actions.setting(input.dataset.setting, input.type === 'checkbox' ? input.checked : input.value));
+  });
   host.querySelectorAll('[data-appearance]').forEach((input) => {
     const eventName = input.matches('input[type="checkbox"]') ? 'change' : 'input';
     input.addEventListener(eventName, () => actions.appearance(input.dataset.appearance, input.type === 'checkbox' ? input.checked : input.value));
   });
-  host.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => actions.action(button.dataset.action)));
+  host.querySelectorAll('[data-action="adjust-global-tag-distance"]').forEach((input) => {
+    const output = input.closest('.tag-global-distance-wrap')?.querySelector('[data-global-distance-output]');
+    const updateDisplay = () => {
+      const val = Number(input.value) || 0;
+      if (output) output.textContent = val > 0 ? `+${val} %` : `${val} %`;
+      return val;
+    };
+    input.addEventListener('input', () => {
+      const val = updateDisplay();
+      actions.adjustAllTagsDistance?.(val, { transient: true });
+    });
+    input.addEventListener('change', () => {
+      const val = updateDisplay();
+      actions.adjustAllTagsDistance?.(val, { transient: false });
+    });
+  });
+  host.querySelectorAll('[data-action]').forEach((button) => {
+    if (button.dataset.action === 'adjust-global-tag-distance') return;
+    button.addEventListener('click', () => actions.action(button.dataset.action));
+  });
 }

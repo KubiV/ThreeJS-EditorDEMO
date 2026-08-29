@@ -59,6 +59,8 @@ export class AnnotationManager {
     this.hiddenTagIds = new Set();
     this.selectedId = null;
     this.drag = null;
+    this.arrangeMode = false;
+    this.canEdit = true;
     this.preview = createLine({ color: '#68a9d5', width: 1.5, dashed: true });
     this.preview.visible = false;
     this.previewAnchor = new THREE.Mesh(
@@ -70,6 +72,15 @@ export class AnnotationManager {
     this.brushPreview.name = 'Náhled štětce plochy';
     this.sceneManager.annotationRoot.add(this.preview, this.previewAnchor);
     this.sceneManager.annotationRoot.add(this.brushPreview);
+  }
+
+  setCanEdit(canEdit) {
+    this.canEdit = Boolean(canEdit);
+  }
+
+  setArrangeMode(enabled) {
+    this.arrangeMode = Boolean(enabled);
+    this.update(this.sceneManager.camera);
   }
 
   setTags(tags = [], { preserveCategories = true, categories = [], hiddenTagIds = this.hiddenTagIds } = {}) {
@@ -101,8 +112,60 @@ export class AnnotationManager {
     label.textContent = tag.title || 'Nový štítek';
     label.title = `Zobrazit popisek: ${tag.title || 'Nový štítek'}`;
     label.style.setProperty('--category-color', color);
-    label.addEventListener('click', (event) => {
+
+    let pointerState = null;
+
+    label.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      if (this.arrangeMode) {
+        event.stopPropagation();
+        pointerState = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          dragging: false
+        };
+        label.setPointerCapture?.(event.pointerId);
+      }
+    });
+
+    label.addEventListener('pointermove', (event) => {
+      if (!this.arrangeMode || !pointerState || pointerState.pointerId !== event.pointerId) return;
       event.stopPropagation();
+      const dist = Math.hypot(event.clientX - pointerState.startX, event.clientY - pointerState.startY);
+      if (!pointerState.dragging) {
+        if (dist > 4) {
+          pointerState.dragging = true;
+          this.beginTagDrag(tag, event, label);
+        }
+      } else {
+        this.dragTag(event);
+      }
+    });
+
+    const handlePointerUp = (event) => {
+      if (!pointerState || pointerState.pointerId !== event.pointerId) return;
+      event.stopPropagation();
+      label.releasePointerCapture?.(event.pointerId);
+      const wasDragging = pointerState.dragging;
+      pointerState = null;
+      if (wasDragging) {
+        this.endTagDrag();
+      } else {
+        this.select(tag.id);
+      }
+    };
+
+    label.addEventListener('pointerup', handlePointerUp);
+    label.addEventListener('pointercancel', (event) => {
+      if (!pointerState || pointerState.pointerId !== event.pointerId) return;
+      label.releasePointerCapture?.(event.pointerId);
+      if (pointerState.dragging) this.endTagDrag();
+      pointerState = null;
+    });
+
+    label.addEventListener('click', () => {
+      if (this.arrangeMode) return;
       this.select(tag.id);
     });
 
@@ -197,7 +260,7 @@ export class AnnotationManager {
     this.items.forEach((item, itemId) => {
       const active = itemId === id;
       item.label.classList.toggle('is-selected', active);
-      item.handle.visible = active && this.visibleCategories.has(item.tag.category) && !this.hiddenTagIds.has(item.tag.id);
+      item.handle.visible = Boolean(this.arrangeMode) && this.visibleCategories.has(item.tag.category) && !this.hiddenTagIds.has(item.tag.id);
     });
     if (focus) this.sceneManager.focus(tag.position, tag.normal);
     this.onSelect?.(tag);
@@ -209,7 +272,7 @@ export class AnnotationManager {
     this.selectedId = null;
     this.items.forEach((item) => {
       item.label.classList.remove('is-selected');
-      item.handle.visible = false;
+      item.handle.visible = Boolean(this.arrangeMode) && this.visibleCategories.has(item.tag.category) && !this.hiddenTagIds.has(item.tag.id);
     });
     this.onSelect?.(undefined);
     this.update(this.sceneManager.camera);
@@ -246,7 +309,8 @@ export class AnnotationManager {
       anchor.position.copy(start);
       anchor.visible = isVisible && !hasSurface;
       handle.position.copy(end);
-      handle.visible = isVisible && tag.id === this.selectedId;
+      handle.visible = isVisible && Boolean(this.arrangeMode);
+      label.classList.toggle('is-arranging', Boolean(this.arrangeMode));
       highlight.visible = isVisible;
       // Markers are screen-legible but never use an absolute world-unit minimum.
       // That would turn a marker into a disk on models with a small coordinate range.
@@ -330,25 +394,23 @@ export class AnnotationManager {
     this.previewAnchor.visible = false;
   }
 
-  beginHandleDrag(event) {
-    const handles = [...this.items.values()].map((item) => item.handle).filter((handle) => handle.visible);
-    const hit = this.sceneManager.intersectObjects(event, handles);
-    if (!hit?.object?.userData?.annotationId) return false;
-    const tag = this.tags.find((item) => item.id === hit.object.userData.annotationId);
-    if (!tag) return false;
+  beginTagDrag(tag, event, element = null) {
+    if (!this.arrangeMode) return false;
     const anchor = new THREE.Vector3().fromArray(tag.position);
     const worldAnchor = this.sceneManager.contentPointToWorld(anchor);
     const cameraDirection = new THREE.Vector3().subVectors(this.sceneManager.camera.position, this.sceneManager.controls.target).normalize();
     this.drag = {
       tag,
       anchor,
+      element,
       plane: new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, worldAnchor)
     };
+    if (element) element.classList.add('is-dragging');
     this.sceneManager.controls.enabled = false;
     return true;
   }
 
-  dragHandle(event) {
+  dragTag(event) {
     if (!this.drag) return false;
     const point = this.sceneManager.getRay(event).intersectPlane(this.drag.plane, new THREE.Vector3());
     if (!point) return true;
@@ -362,13 +424,32 @@ export class AnnotationManager {
     return true;
   }
 
-  endHandleDrag() {
+  endTagDrag() {
     if (!this.drag) return false;
     const tag = this.drag.tag;
+    if (this.drag.element) this.drag.element.classList.remove('is-dragging');
     this.drag = null;
     this.sceneManager.controls.enabled = true;
     this.onChange?.(tag, { transient: false });
     return true;
+  }
+
+  beginHandleDrag(event) {
+    if (!this.arrangeMode) return false;
+    const handles = [...this.items.values()].map((item) => item.handle).filter((handle) => handle.visible);
+    const hit = this.sceneManager.intersectObjects(event, handles);
+    if (!hit?.object?.userData?.annotationId) return false;
+    const tag = this.tags.find((item) => item.id === hit.object.userData.annotationId);
+    if (!tag) return false;
+    return this.beginTagDrag(tag, event);
+  }
+
+  dragHandle(event) {
+    return this.dragTag(event);
+  }
+
+  endHandleDrag() {
+    return this.endTagDrag();
   }
 
   dispose() {

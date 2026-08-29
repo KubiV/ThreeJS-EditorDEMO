@@ -146,7 +146,8 @@ function buildAnatomyData() {
   }
 
   console.log(`Čtu Excel soubor: ${EXCEL_PATH}`);
-  const workbook = XLSX.readFile(EXCEL_PATH);
+  const fileBuffer = fs.readFileSync(EXCEL_PATH);
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
 
   // Pass 1: Build Level 2 section map (Axx.x) and Level 3 group head map (Axx.x.xx)
   const level2Map = new Map();

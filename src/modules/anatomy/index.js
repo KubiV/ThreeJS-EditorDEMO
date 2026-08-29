@@ -67,6 +67,18 @@ export const AnatomyModule = {
     return searchIndex.search(query, { systemId, limit });
   },
 
+  async getStructures({ systemId = '', query = '', limit = 40 } = {}) {
+    await loadData();
+    if (!searchIndex) return [];
+    return searchIndex.getStructures({ systemId, query, limit });
+  },
+
+  async getStructureElements(structureQuery, { subQuery = '', systemId = '', limit = 200 } = {}) {
+    await loadData();
+    if (!searchIndex) return { structureQuery, direct: [], related: [], totalCount: 0 };
+    return searchIndex.getStructureElements(structureQuery, { subQuery, systemId, limit });
+  },
+
   async getTermById(id) {
     const data = await loadData();
     if (!id) return null;

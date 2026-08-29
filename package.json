@@ -16,14 +16,15 @@
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
-    "express": "^4.19.2",
+    "express": "^4.21.2",
     "meshoptimizer": "^1.2.0",
     "multer": "^2.0.2",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.4",
     "three": "^0.165.0"
   },
   "devDependencies": {
-    "vite": "^5.3.1",
-    "xlsx": "^0.18.5"
+    "vite": "^6.2.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
+

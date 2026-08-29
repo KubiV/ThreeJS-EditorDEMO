@@ -25,7 +25,7 @@ export function showToast(message, type = 'info') {
 }
 
 /** A workflow instruction remains visible until its caller explicitly clears it. */
-export function showPersistentNotice(id, message, type = 'info') {
+export function showPersistentNotice(id, message, type = 'info', action = null) {
   const stack = noticeStack();
   let notice = stack.querySelector(`[data-notice-id="${CSS.escape(id)}"]`);
   if (!notice) {
@@ -36,7 +36,26 @@ export function showPersistentNotice(id, message, type = 'info') {
     stack.append(notice);
   }
   notice.dataset.type = type;
-  notice.textContent = message;
+  notice.replaceChildren();
+
+  const text = document.createElement('span');
+  text.className = 'persistent-notice-text';
+  text.textContent = message;
+  notice.append(text);
+
+  if (action && action.label) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'persistent-notice-action';
+    button.textContent = action.label;
+    if (typeof action.onClick === 'function') {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        action.onClick();
+      });
+    }
+    notice.append(button);
+  }
 }
 
 export function hidePersistentNotice(id) {

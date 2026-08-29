@@ -59,9 +59,12 @@ function tokenMatchesWord(token, word) {
 }
 
 /**
- * Prepares searchable index for term items.
+ * Prepares searchable index for term items and anatomical structures.
  */
 export function createSearchIndex(terms = []) {
+  // Build structure catalogue from parent fields and term definitions
+  const structureMap = new Map();
+
   const indexed = terms.map((term) => {
     const normId = normalizeSearchText(term.taCode || term.id);
     const normLatin = normalizeSearchText(term.latin);
@@ -73,12 +76,32 @@ export function createSearchIndex(terms = []) {
     const englishWords = normEnglish.split(' ').filter(Boolean);
     const contextWords = [...new Set([...normParent.split(' '), ...normParentEnglish.split(' '), ...normPath.split(' ')])].filter(Boolean);
 
+    // Track structure from parent
+    if (term.parent && term.parent.trim()) {
+      const parentName = term.parent.trim();
+      const normP = normalizeSearchText(parentName);
+      if (!structureMap.has(normP)) {
+        structureMap.set(normP, {
+          name: parentName,
+          latin: parentName,
+          english: term.parentEnglish || '',
+          systemId: term.systemId,
+          count: 0,
+          terms: []
+        });
+      }
+      const st = structureMap.get(normP);
+      st.count++;
+      st.terms.push(term);
+    }
+
     return {
       term,
       normId,
       normLatin,
       normEnglish,
       normParent,
+      normPath,
       latinWords,
       englishWords,
       contextWords
@@ -86,6 +109,98 @@ export function createSearchIndex(terms = []) {
   });
 
   return {
+    /**
+     * Returns a list of known anatomical structures (bones, organs, groups).
+     */
+    getStructures({ systemId = '', query = '', limit = 40 } = {}) {
+      const cleanQuery = normalizeSearchText(query);
+      const list = Array.from(structureMap.values());
+      
+      let filtered = list;
+      if (systemId) {
+        filtered = filtered.filter((s) => s.systemId === systemId);
+      }
+      if (cleanQuery) {
+        filtered = filtered.filter((s) => {
+          const normN = normalizeSearchText(s.name);
+          const normE = normalizeSearchText(s.english);
+          return normN.includes(cleanQuery) || normE.includes(cleanQuery);
+        });
+      }
+
+      // Sort by term count descending
+      filtered.sort((a, b) => b.count - a.count);
+      return filtered.slice(0, limit).map((s) => ({
+        name: s.name,
+        latin: s.latin,
+        english: s.english,
+        systemId: s.systemId,
+        count: s.count
+      }));
+    },
+
+    /**
+     * Finds all direct parts and related anatomical elements for a given structure query.
+     */
+    getStructureElements(structureQuery, { subQuery = '', systemId = '', limit = 200 } = {}) {
+      const cleanStructure = normalizeSearchText(structureQuery);
+      if (!cleanStructure) {
+        return { structureQuery: '', direct: [], related: [], totalCount: 0 };
+      }
+
+      const structTokens = cleanStructure.split(' ').filter(Boolean);
+      const cleanSub = normalizeSearchText(subQuery);
+      const subTokens = cleanSub.split(' ').filter(Boolean);
+
+      const direct = [];
+      const related = [];
+      const seenIds = new Set();
+
+      for (let i = 0; i < indexed.length; i++) {
+        const item = indexed[i];
+        if (systemId && item.term.systemId !== systemId) continue;
+
+        // Subquery filter if provided
+        if (subTokens.length > 0) {
+          const matchesSub = subTokens.every((tok) =>
+            item.normLatin.includes(tok) ||
+            item.normEnglish.includes(tok) ||
+            item.normId.includes(tok)
+          );
+          if (!matchesSub) continue;
+        }
+
+        const isExactName = item.normLatin === cleanStructure || item.normEnglish === cleanStructure;
+        const isParentMatch = structTokens.every((tok) => item.normParent.includes(tok));
+
+        if (isExactName || isParentMatch) {
+          if (!seenIds.has(item.term.id)) {
+            seenIds.add(item.term.id);
+            direct.push(item.term);
+          }
+        } else {
+          const isPathMatch = structTokens.every((tok) => item.normPath.includes(tok));
+          const isLatinMatch = structTokens.every((tok) => item.normLatin.includes(tok));
+          const isEnglishMatch = structTokens.every((tok) => item.normEnglish.includes(tok));
+
+          if (isPathMatch || isLatinMatch || isEnglishMatch) {
+            if (!seenIds.has(item.term.id)) {
+              seenIds.add(item.term.id);
+              related.push(item.term);
+            }
+          }
+        }
+      }
+
+      const totalCount = direct.length + related.length;
+      return {
+        structureQuery,
+        direct: direct.slice(0, limit),
+        related: related.slice(0, limit),
+        totalCount
+      };
+    },
+
     search(query, { systemId, limit = 25 } = {}) {
       const cleanQuery = normalizeSearchText(query);
       if (!cleanQuery) {

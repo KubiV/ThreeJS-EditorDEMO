@@ -19,7 +19,7 @@ export function showModelInfoDialog(model, { onSave } = {}) {
   dialog.className = 'modal model-info-modal';
   dialog.innerHTML = `
     <form method="dialog">
-      <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+      <button class="modal-close" type="button" data-close aria-label="Zavřít">${actionIconMarkup('cancel')}</button>
       <h2>Upravit informace o modelu</h2>
       <p>Tyto údaje se uloží do definujícího článku 3D modelu.</p>
       <label>Název modelu<input name="title" required maxlength="120" value="${escapeHtml(draft.title)}"></label>
@@ -66,7 +66,7 @@ export function showTagDialog(tag, { onSave, onEditLeaderLine, categories = DEFA
   dialog.className = 'modal';
   dialog.innerHTML = `
     <form method="dialog">
-      <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+      <button class="modal-close" type="button" data-close aria-label="Zavřít">${actionIconMarkup('cancel')}</button>
       <h2>${tag.id ? 'Upravit štítek' : 'Nový štítek'}</h2>
       <p>Souřadnice jsou ukotveny na povrchu modelu. Táhněte koncovým bodem vodicí čáry přímo ve 3D pohledu.</p>
       <label>Název štítku<input name="title" required value="${escapeHtml(draft.title)}" placeholder="Např. Hlavní vstup" /></label>
@@ -134,7 +134,7 @@ export function showCategoryDialog(categories, { onSave, usedCategoryIds = [], s
   const render = () => {
     dialog.innerHTML = `
       <form method="dialog">
-        <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+        <button class="modal-close" type="button" data-close aria-label="Zavřít">${actionIconMarkup('cancel')}</button>
         <h2>Společné kategorie</h2>
         <p>Kategorie jsou sdílené mezi všemi 3D modely a ukládají se do článku 3D:Kategorie. Jejich barva se vypočítá z názvu a zůstává stejná ve vieweru i ve vloženém prohlížeči.</p>
         <div class="category-editor-list">${draft.map((category, index) => `
@@ -201,7 +201,7 @@ export function showExportDialog(parserTag, { onPublish, onCopied, onPublished, 
   dialog.className = 'modal export-modal';
   dialog.innerHTML = `
     <form method="dialog">
-      <button class="modal-close" type="button" data-close aria-label="Zavřít">×</button>
+      <button class="modal-close" type="button" data-close aria-label="Zavřít">${actionIconMarkup('cancel')}</button>
       <h2>Aktualizovat 3D model</h2>
       <p>Do definujícího článku se zapíše úplná konfigurace modelu: soubory, varianty, vzhled, kamera, kategorie i štítky. ${configurationNote}</p>
       <textarea readonly rows="11" data-parser-tag>${escapeHtml(parserTag)}</textarea>

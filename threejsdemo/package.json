@@ -9,13 +9,11 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "vite": "^5.3.1",
-    "webpack": "^5.92.1",
-    "webpack-cli": "^5.1.4"
+    "vite": "^6.2.0"
   },
   "dependencies": {
     "dat.gui": "^0.7.9",
-    "express": "^4.19.2",
+    "express": "^4.21.2",
     "file-saver": "^2.0.5",
     "lil-gui": "^0.19.2",
     "three": "^0.165.0"
