@@ -185,28 +185,43 @@ Pro omezení režimu `login-required` například na studenty a vyučující nas
 Každý nový záznam si uloží MediaWiki jméno uživatele, který model nahrál.
 Výchozí nastavení zachovává chování starších instalací: každý přihlášený účet
 s právem `edit` může modely upravovat a nahrávat. V `LocalSettings.js` lze
-později zapnout omezení úprav jen na vlastníka nahrání a doplnit účty s
-oprávněním spravovat všechny modely nebo jen provádět citlivější akce:
+později zapnout omezení úprav jen na vlastníka nahrání a doplnit konkrétní účty
+nebo celé uživatelské skupiny MediaWiki s oprávněním spravovat modely či
+provádět citlivější akce:
 
 ```js
 security: {
   // …stávající nastavení…
   modelManagement: {
     requireOwnershipForEdits: false,
+    // Společné skupiny pro všechny správní operace (volitelné):
+    // groups: ['administrátor', 'bureaucrat'],
     editors: ['JanaNovakova'],
+    editorGroups: ['administrátor', 'bureaucrat'],
     deleters: ['Spravce3D'],
-    thumbnailRegenerators: ['Spravce3D', 'JanaNovakova']
+    deleterGroups: ['administrátor', 'bureaucrat'],
+    thumbnailRegenerators: ['Spravce3D', 'JanaNovakova'],
+    thumbnailRegeneratorGroups: ['administrátor']
   }
 }
 ```
 
-Jména se porovnávají bez ohledu na velikost písmen. Nastavení
-`requireOwnershipForEdits: true` zapne přísný režim: upravovat může jen vlastník
-nahrání nebo účet v `editors`; ponechte ho jako `false`, dokud starší záznamy
-nemají doplněného vlastníka. Mazání odstraní složku modelu i jeho článek `3D:`;
-účet proto musí mít vedle zápisu v `deleters` také právo `delete` v MediaWiki.
-Přegenerování náhledu je dostupné v pokročilém rozhraní po uložení výchozího
-pohledu/natočení a zachová stejný vizuální styl jako původní náhled.
+Jména účtů se porovnávají bez ohledu na velikost písmen. Skupiny lze zadat do
+samostatných polí `*Groups` (případně společného `groups`), nebo přímo do
+seznamů `editors`, `deleters` a `thumbnailRegenerators` s předponou `group:název`
+či `skupina:název`. Podporovány jsou standardní názvy i běžná česká synonyma:
+`administrátor`, `administrátoři`, `administrator`, `admin`, `správce` i `sysop`
+(interní název v MediaWiki API) se automaticky namapují na odpovídající roli;
+obdobně `bureaucrat`, `byrokrat` a `byrokrati`. Pozor: na WikiSkriptech jsou
+nejvyšší běžnou rolí administrátoři ("administrátor" / "sysop"), nikoliv byrokrati.
+
+Nastavení `requireOwnershipForEdits: true` zapne přísný režim: upravovat může jen
+vlastník nahrání nebo účet/skupina v `editors` / `editorGroups`; ponechte ho jako
+`false`, dokud starší záznamy nemají doplněného vlastníka. Mazání odstraní složku
+modelu i jeho článek `3D:`; účet proto musí mít vedle zápisu v `deleters` či
+`deleterGroups` také právo `delete` v MediaWiki. Přegenerování náhledu je dostupné
+v pokročilém rozhraní po uložení výchozího pohledu/natočení a zachová stejný
+vizuální styl jako původní náhled.
 
 Pro ověření relace musí cookie MediaWiki přicházet i k Node aplikaci. Použijte
 stejný host pro wiki a prohlížeč, nebo bezpečně nastavte společnou cookie doménu

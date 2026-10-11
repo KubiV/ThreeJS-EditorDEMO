@@ -268,6 +268,42 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
       ${state.rotationGizmoVisible ? '<p class="default-view-pending" role="status">Kruhy jsou aktivní. Tažením za červený, zelený nebo modrý kruh natočíte těleso.</p>' : ''}
       ${state.defaultOrientationDirty ? '<p class="default-view-pending" role="status">Natočení je připraveno. Dokončete změnu tlačítkem „Uložit“ v horní liště.</p>' : ''}
     </details>` : '';
+  const tagAppearancePanel = `
+    <details class="panel-section tag-appearance-section collapsible-section">${collapsibleHeading('tag-appearance', 'Zobrazení textu a vodících čar')}
+      <div class="settings tag-appearance-settings">
+        <label>Zobrazení nápisů za objektem
+          <select data-setting="behindMode">
+            <option value="hide" ${state.behindMode === 'hide' ? 'selected' : ''}>Skrýt nápisy za objektem (nejsou vidět)</option>
+            <option value="dim" ${state.behindMode === 'dim' ? 'selected' : ''}>Ztlumit nápisy za objektem (poloprůhledné)</option>
+            <option value="all" ${state.behindMode === 'all' ? 'selected' : ''}>Normální — všechny nápisy navrchu (jako dříve)</option>
+          </select>
+        </label>
+        <label>Rámeček textu
+          <select data-setting="labelFrameStyle">
+            <option value="border" ${state.labelFrameStyle === 'border' ? 'selected' : ''}>S rámečkem</option>
+            <option value="none" ${state.labelFrameStyle === 'none' ? 'selected' : ''}>Bez rámečku</option>
+          </select>
+        </label>
+        <label class="setting-checkbox">
+          <input type="checkbox" data-setting="showAnchorDot" ${state.showAnchorDot ? 'checked' : ''}>
+          <span>Zobrazit tečku na modelu</span>
+        </label>
+        <label>Chování velikosti tečky
+          <select data-setting="anchorDotSizeMode">
+            <option value="dynamic" ${state.anchorDotSizeMode === 'dynamic' ? 'selected' : ''}>Měnit podle přiblížení (dynamická)</option>
+            <option value="fixed" ${state.anchorDotSizeMode === 'fixed' ? 'selected' : ''}>Pevná velikost poměrově k modelu</option>
+            <option value="none" ${state.anchorDotSizeMode === 'none' ? 'selected' : ''}>Nezobrazovat tečku na modelu</option>
+          </select>
+        </label>
+        <label class="setting-range-wrap">
+          <span class="setting-range-header">
+            <span>Velikost tečky na modelu</span>
+            <output data-setting-output="anchorDotScale">${Math.round((state.anchorDotScale ?? 1) * 100)} %</output>
+          </span>
+          <input type="range" data-setting="anchorDotScale" min="20" max="300" step="5" value="${Math.round((state.anchorDotScale ?? 1) * 100)}">
+        </label>
+      </div>
+    </details>`;
   const appearancePanel = isAdvanced ? `
     <details class="panel-section model-appearance is-advanced collapsible-section">${collapsibleHeading('model-appearance', 'Vzhled modelu')}<div class="settings appearance-settings">
       <label>Barva modelu<input type="color" data-appearance="color" value="${escapeHtml(appearance.color)}" ${appearanceDisabled}></label>
@@ -310,6 +346,7 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
         ${categoryFilters ? `<p class="tag-visibility-heading">Zobrazení podle kategorií</p><div class="category-filters">${categoryFilters}</div>` : ''}
         <div class="tag-list">${tagList || '<p class="empty-note">Zatím nejsou vloženy žádné štítky.</p>'}</div></section>
         <section class="description-card ${selectedTag ? '' : 'is-empty'}"><p class="eyebrow">POPIS ŠTÍTKU</p>${selectedTag ? `<div class="description-heading"><div><h2>${escapeHtml(selectedTag.title)}</h2>${sidebarModuleDetail}</div>${editable ? `<div class="description-actions"><button class="small-button" data-action="edit-tag">${actionIconMarkup('edit')}Upravit</button><button class="small-button small-button-danger" data-action="delete-tag">${actionIconMarkup('delete')}Odstranit</button></div>` : ''}</div><div class="wikitext">${renderWikitext(selectedTag.description, { wikiArticleUrl: state.wikiArticleUrl })}</div>` : '<p>Vyberte štítek v seznamu nebo přímo v 3D pohledu.</p>'}</section>
+        ${tagAppearancePanel}
         ${appearancePanel}
         ${isAdvanced ? `${defaultViewPanel}${orientationPanel}${technicalInfo}` : ''}
         ${managementPanel}
@@ -334,8 +371,14 @@ export function renderSidebar(host, model, selectedTag, state, actions) {
   }));
   host.querySelectorAll('[data-category]').forEach((input) => input.addEventListener('change', () => actions.category(input.dataset.category, input.checked)));
   host.querySelectorAll('[data-setting]').forEach((input) => {
-    const eventName = input.matches('input[type="checkbox"]') ? 'change' : 'input';
-    input.addEventListener(eventName, () => actions.setting(input.dataset.setting, input.type === 'checkbox' ? input.checked : input.value));
+    const eventName = input.matches('input[type="checkbox"], select') ? 'change' : 'input';
+    input.addEventListener(eventName, () => {
+      actions.setting(input.dataset.setting, input.type === 'checkbox' ? input.checked : input.value);
+      if (input.type === 'range') {
+        const output = host.querySelector(`[data-setting-output="${input.dataset.setting}"]`);
+        if (output) output.textContent = `${Math.round(Number(input.value))} %`;
+      }
+    });
   });
   host.querySelectorAll('[data-appearance]').forEach((input) => {
     const eventName = input.matches('input[type="checkbox"]') ? 'change' : 'input';

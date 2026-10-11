@@ -4,12 +4,21 @@ import { createServer as createHttpServer } from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MODEL_APPEARANCE, capitalizeTitle, normalizeCategoryDefinitions, normalizeModelAppearance, parseCategoryWikitext, parseModel3dWikitext } from './src/api/model3d-format.js';
 import { createModelArtifacts, regenerateModelThumbnail } from './src/server/model-artifacts.js';
 import localSettings from './LocalSettings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(await fs.readFile(path.join(__dirname, 'package.json'), 'utf-8'));
+const appVersion = packageJson.version || '2.0.0';
+let gitCommit = '';
+try {
+  gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+} catch {
+  gitCommit = '';
+}
 
 function settingsObject(value, name) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`LocalSettings.js: sekce „${name}“ musí být objekt.`);
@@ -76,10 +85,140 @@ function accountKey(value) {
   return String(value || '').trim().normalize('NFC').toLocaleLowerCase('cs-CZ');
 }
 
-function configuredAccounts(value, name) {
-  if (value === undefined || value === null) return new Set();
-  if (!Array.isArray(value)) throw new Error(`LocalSettings.js: „${name}“ musí být pole uživatelských jmen MediaWiki.`);
-  return new Set(value.map((user, index) => accountKey(accountName(user, `${name}[${index}]`))));
+function groupName(value, name) {
+  const group = settingText(value, name).normalize('NFC');
+  if (!group) throw new Error(`LocalSettings.js: skupina v „${name}“ nesmí být prázdná.`);
+  return group;
+}
+
+function normalizeGroupKey(value) {
+  const trimmed = String(value || '').trim().normalize('NFC').toLocaleLowerCase('cs-CZ');
+  const ascii = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const aliases = {
+    sysop: 'sysop',
+    sysops: 'sysop',
+    admin: 'sysop',
+    admins: 'sysop',
+    administrator: 'sysop',
+    administrators: 'sysop',
+    administratori: 'sysop',
+    administraci: 'sysop',
+    administratory: 'sysop',
+    spravce: 'sysop',
+    spravci: 'sysop',
+    bureaucrat: 'bureaucrat',
+    bureaucrats: 'bureaucrat',
+    byrokrat: 'bureaucrat',
+    byrokrati: 'bureaucrat',
+    byrokrate: 'bureaucrat',
+    'interface-admin': 'interface-admin',
+    interfaceadmin: 'interface-admin',
+    'interface-admins': 'interface-admin',
+    interfaceadmins: 'interface-admin',
+    'spravce-rozhrani': 'interface-admin',
+    'spravce rozhrani': 'interface-admin',
+    'spravci-rozhrani': 'interface-admin',
+    'spravci rozhrani': 'interface-admin',
+    bot: 'bot',
+    bots: 'bot',
+    boti: 'bot',
+    editor: 'editor',
+    editors: 'editor',
+    redaktor: 'editor',
+    redaktori: 'editor'
+  };
+  return aliases[ascii] || trimmed;
+}
+
+function isKnownGroupAlias(value) {
+  const trimmed = String(value || '').trim().normalize('NFC').toLocaleLowerCase('cs-CZ');
+  const ascii = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const known = new Set([
+    'sysop', 'sysops', 'admin', 'admins', 'administrator', 'administrators', 'administratori',
+    'administraci', 'administratory', 'spravce', 'spravci', 'bureaucrat', 'bureaucrats',
+    'byrokrat', 'byrokrati', 'byrokrate', 'interface-admin', 'interfaceadmin', 'interface-admins',
+    'interfaceadmins', 'spravce-rozhrani', 'spravce rozhrani', 'spravci-rozhrani', 'spravci rozhrani'
+  ]);
+  return known.has(ascii);
+}
+
+function parsePrincipalEntry(rawEntry, name) {
+  const text = settingText(rawEntry, name).normalize('NFC');
+  if (!text) throw new Error(`LocalSettings.js: hodnota v „${name}“ nesmí být prázdná.`);
+  const lower = text.toLowerCase();
+  for (const prefix of ['group:', 'skupina:']) {
+    if (lower.startsWith(prefix)) {
+      const group = text.slice(prefix.length).trim();
+      if (!group) throw new Error(`LocalSettings.js: název skupiny v „${name}“ nesmí být prázdný.`);
+      return { type: 'group', group: normalizeGroupKey(group), raw: text };
+    }
+  }
+  if (text.startsWith('@') || text.startsWith('#')) {
+    const group = text.slice(1).trim();
+    if (!group) throw new Error(`LocalSettings.js: název skupiny v „${name}“ nesmí být prázdný.`);
+    return { type: 'group', group: normalizeGroupKey(group), raw: text };
+  }
+  if (isKnownGroupAlias(text)) {
+    return { type: 'both', account: accountKey(text), group: normalizeGroupKey(text), raw: text };
+  }
+  return { type: 'account', account: accountKey(text), raw: text };
+}
+
+function configuredPrincipals({ accounts, groups, fallbackGroups = [] }, name) {
+  const accountSet = new Set();
+  const groupSet = new Set();
+
+  for (const group of fallbackGroups) {
+    if (group) groupSet.add(normalizeGroupKey(group));
+  }
+
+  if (groups !== undefined && groups !== null) {
+    if (!Array.isArray(groups)) throw new Error(`LocalSettings.js: „${name}Groups“ musí být pole skupin MediaWiki.`);
+    groups.forEach((group, index) => {
+      groupSet.add(normalizeGroupKey(groupName(group, `${name}Groups[${index}]`)));
+    });
+  }
+
+  if (accounts !== undefined && accounts !== null) {
+    if (!Array.isArray(accounts)) throw new Error(`LocalSettings.js: „${name}“ musí být pole uživatelů nebo skupin MediaWiki.`);
+    accounts.forEach((account, index) => {
+      const parsed = parsePrincipalEntry(account, `${name}[${index}]`);
+      if (parsed.type === 'group') {
+        groupSet.add(parsed.group);
+      } else if (parsed.type === 'both') {
+        accountSet.add(parsed.account);
+        groupSet.add(parsed.group);
+      } else {
+        accountSet.add(parsed.account);
+      }
+    });
+  }
+
+  return { accounts: accountSet, groups: groupSet };
+}
+
+function userGroupKeys(user) {
+  const keys = new Set();
+  for (const group of user?.groups || []) {
+    const raw = String(group || '').trim().normalize('NFC').toLocaleLowerCase('cs-CZ');
+    if (!raw) continue;
+    keys.add(raw);
+    keys.add(raw.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+    keys.add(normalizeGroupKey(raw));
+  }
+  return keys;
+}
+
+function userHasManagementAccess(user, principals) {
+  if (!user || !principals) return false;
+  const userKey = accountKey(user.name);
+  if (userKey && principals.accounts.has(userKey)) return true;
+  if (!principals.groups || principals.groups.size === 0) return false;
+  const uGroups = userGroupKeys(user);
+  for (const group of principals.groups) {
+    if (uGroups.has(group)) return true;
+  }
+  return false;
 }
 
 const serverSettings = settingsObject(localSettings?.server, 'server');
@@ -124,9 +263,27 @@ if (securitySettings.trustedOrigins !== undefined && !Array.isArray(securitySett
 const trustedWriteOrigins = new Set((securitySettings.trustedOrigins || []).map((origin, index) => normalizeOrigin(origin, `security.trustedOrigins[${index}]`)));
 const modelAccessSettings = optionalSettingsObject(securitySettings.modelAccess, 'security.modelAccess');
 const modelManagementSettings = optionalSettingsObject(securitySettings.modelManagement, 'security.modelManagement');
-const configuredModelEditors = configuredAccounts(modelManagementSettings.editors, 'security.modelManagement.editors');
-const configuredModelDeleters = configuredAccounts(modelManagementSettings.deleters, 'security.modelManagement.deleters');
-const configuredThumbnailRegenerators = configuredAccounts(modelManagementSettings.thumbnailRegenerators, 'security.modelManagement.thumbnailRegenerators');
+const configuredCommonManagementGroups = (() => {
+  const raw = modelManagementSettings.groups ?? modelManagementSettings.adminGroups;
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error('LocalSettings.js: „security.modelManagement.groups“ musí být pole skupin MediaWiki.');
+  return raw.map((group, index) => groupName(group, `security.modelManagement.groups[${index}]`));
+})();
+const configuredModelEditors = configuredPrincipals({
+  accounts: modelManagementSettings.editors,
+  groups: modelManagementSettings.editorGroups,
+  fallbackGroups: configuredCommonManagementGroups
+}, 'security.modelManagement.editors');
+const configuredModelDeleters = configuredPrincipals({
+  accounts: modelManagementSettings.deleters,
+  groups: modelManagementSettings.deleterGroups,
+  fallbackGroups: configuredCommonManagementGroups
+}, 'security.modelManagement.deleters');
+const configuredThumbnailRegenerators = configuredPrincipals({
+  accounts: modelManagementSettings.thumbnailRegenerators,
+  groups: modelManagementSettings.thumbnailRegeneratorGroups ?? modelManagementSettings.thumbnailRegeneratorsGroups,
+  fallbackGroups: configuredCommonManagementGroups
+}, 'security.modelManagement.thumbnailRegenerators');
 // Keep installations updated from older versions working as before: every
 // authenticated MediaWiki editor may edit a model. An administrator may opt
 // into owner-only edits only after legacy records have an assigned owner.
@@ -152,7 +309,7 @@ const configuredModelAccessRequireLogin = configuredModelAccessMode === 'login-r
 const configuredModelAccessGroups = new Set((modelAccessSettings.allowedGroups || []).map((group, index) => {
   const value = settingText(group, `security.modelAccess.allowedGroups[${index}]`);
   if (!value) throw new Error('LocalSettings.js: skupina v „security.modelAccess.allowedGroups“ nesmí být prázdná.');
-  return value.toLocaleLowerCase('en-US');
+  return normalizeGroupKey(value);
 }));
 if (!configuredModelAccessRequireLogin && configuredModelAccessGroups.size) {
   throw new Error('LocalSettings.js: skupiny pro modely lze použít jen v režimu „security.modelAccess.mode: login-required“.');
@@ -216,9 +373,9 @@ function modelPermissions(user, model) {
   const isOwner = Boolean(userKey && userKey === modelOwnerKey(model));
   return {
     isOwner,
-    canEdit: !configuredOwnershipEditOnly || isOwner || configuredModelEditors.has(userKey),
-    canDelete: configuredModelDeleters.has(userKey),
-    canRegenerateThumbnail: configuredThumbnailRegenerators.has(userKey)
+    canEdit: !configuredOwnershipEditOnly || isOwner || userHasManagementAccess(user, configuredModelEditors),
+    canDelete: userHasManagementAccess(user, configuredModelDeleters),
+    canRegenerateThumbnail: userHasManagementAccess(user, configuredThumbnailRegenerators)
   };
 }
 
@@ -415,7 +572,7 @@ async function requireModelReadAccess(req, res, next) {
     if (!user.rights.includes('read')) {
       return res.status(403).json({ error: 'Váš účet MediaWiki nemá právo číst chráněné 3D modely.' });
     }
-    const groups = new Set(user.groups.map((group) => group.toLocaleLowerCase('en-US')));
+    const groups = userGroupKeys(user);
     if (configuredModelAccessGroups.size && ![...configuredModelAccessGroups].some((group) => groups.has(group))) {
       return res.status(403).json({ error: 'Váš účet MediaWiki nemá přístup do skupiny oprávněné k prohlížení 3D modelů.' });
     }
@@ -578,6 +735,9 @@ app.get('/api/models/permissions', requireMediaWikiEditor, async (req, res, next
 // Only non-secret settings are exposed to the browser, so the same UI works locally and in production.
 app.get('/api/wiki/config', (_req, res) => {
   res.json({
+    version: appVersion,
+    gitCommit,
+    githubUrl: 'https://github.com/KubiV/ThreeJS-EditorDEMO',
     endpoint: configuredWikiApiUrl,
     pagePrefix: configuredPagePrefix,
     categoryPage: configuredCategoryPage,
@@ -1342,7 +1502,7 @@ app.use((error, _req, res, _next) => {
  * Port a chování při kolizi jsou nastavené v LocalSettings.js.
  */
 function startServer(port, allowFallback = fallbackToNextPort) {
-  const onListening = () => console.log(`3D editor běží na http://localhost:${port}`);
+  const onListening = () => console.log(`3D editor v${appVersion}${gitCommit ? ` (${gitCommit})` : ''} běží na http://localhost:${port}`);
   const onError = (error) => {
     httpServer.off('listening', onListening);
     if (error.code === 'EADDRINUSE' && allowFallback && port < requestedPort + 10) {

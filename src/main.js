@@ -15,13 +15,19 @@ import { categoryDefinitions, renderSidebar } from './ui/sidebar.js';
 import { renderTagDraftPanel, renderTagEditorPanel } from './ui/tag-draft-panel.js';
 import { hidePersistentNotice, showPersistentNotice, showToast } from './ui/toast.js';
 import { initPanelResizing, attachLeftPanelResizer, attachSidebarResizer, syncSidebarCollapsedState } from './ui/panel-resizer.js';
+import { APP_VERSION, APP_GIT_COMMIT, getGitHubCommitUrl, getGitHubReleasesUrl } from './version.js';
+
+if (typeof window !== 'undefined') {
+  window.APP_VERSION = APP_VERSION;
+  window.APP_GIT_COMMIT = APP_GIT_COMMIT;
+}
 
 const app = document.querySelector('#app');
 const defaultSettings = () => ({
   ...DEFAULT_MODEL_APPEARANCE,
   lod: 'original',
-  loadStrategy: 'fixed',
-  onDemandLod: 'medium',
+  loadStrategy: 'on-demand',
+  onDemandLod: 'small',
   interfaceMode: 'simple',
   navigationMode: 'orbit',
   showNavigationCubeStandalone: true,
@@ -37,6 +43,11 @@ const defaultSettings = () => ({
   editMode: false,
   canEdit: true,
   labelArrangeMode: false,
+  behindMode: 'all',
+  labelFrameStyle: 'border',
+  showAnchorDot: true,
+  anchorDotSizeMode: 'dynamic',
+  anchorDotScale: 1.0,
   globalTagDistanceSlider: 0,
   globalTagDistanceOffset: 0,
   showSceneCenter: false,
@@ -110,9 +121,9 @@ function readDeviceSettings() {
       ? saved.showNavigationCube
       : undefined;
     return {
-      loadStrategy: ['fixed', 'progressive', 'on-demand'].includes(saved.loadStrategy) ? saved.loadStrategy : 'fixed',
+      loadStrategy: ['fixed', 'progressive', 'on-demand'].includes(saved.loadStrategy) ? saved.loadStrategy : 'on-demand',
       lod: ['small', 'low', 'medium', 'original'].includes(saved.lod) ? saved.lod : 'original',
-      onDemandLod: ['small', 'low', 'medium'].includes(saved.onDemandLod) ? saved.onDemandLod : 'medium',
+      onDemandLod: ['small', 'low', 'medium'].includes(saved.onDemandLod) ? saved.onDemandLod : 'small',
       interfaceMode: saved.interfaceMode === 'advanced' ? 'advanced' : 'simple',
       navigationMode: ['orbit', 'turntable', 'trackball'].includes(saved.navigationMode) ? saved.navigationMode : 'orbit',
       showNavigationCubeStandalone: typeof saved.showNavigationCubeStandalone === 'boolean'
@@ -120,7 +131,12 @@ function readDeviceSettings() {
         : legacyNavigationCube ?? true,
       showNavigationCubeEmbedded: typeof saved.showNavigationCubeEmbedded === 'boolean'
         ? saved.showNavigationCubeEmbedded
-        : false
+        : false,
+      behindMode: ['hide', 'dim', 'all'].includes(saved.behindMode) ? saved.behindMode : 'all',
+      labelFrameStyle: saved.labelFrameStyle === 'none' ? 'none' : 'border',
+      showAnchorDot: saved.anchorDotSizeMode === 'none' ? false : (typeof saved.showAnchorDot === 'boolean' ? saved.showAnchorDot : true),
+      anchorDotSizeMode: ['fixed', 'none', 'dynamic'].includes(saved.anchorDotSizeMode) ? saved.anchorDotSizeMode : (saved.showAnchorDot === false ? 'none' : 'dynamic'),
+      anchorDotScale: Number.isFinite(Number(saved.anchorDotScale)) && Number(saved.anchorDotScale) >= 0.2 && Number(saved.anchorDotScale) <= 3.0 ? Number(saved.anchorDotScale) : 1.0
     };
   } catch {
     return {};
@@ -136,7 +152,12 @@ function saveDeviceSettings() {
       interfaceMode: settings.interfaceMode,
       navigationMode: settings.navigationMode,
       showNavigationCubeStandalone: settings.showNavigationCubeStandalone,
-      showNavigationCubeEmbedded: settings.showNavigationCubeEmbedded
+      showNavigationCubeEmbedded: settings.showNavigationCubeEmbedded,
+      behindMode: settings.behindMode,
+      labelFrameStyle: settings.labelFrameStyle,
+      showAnchorDot: settings.showAnchorDot,
+      anchorDotSizeMode: settings.anchorDotSizeMode,
+      anchorDotScale: settings.anchorDotScale
     }));
   } catch {
     // A privacy-restricted browser may deny local storage; loading still works for this session.
@@ -545,7 +566,10 @@ function viewerMarkup() {
       <div class="viewer-body"><section class="viewport">
           ${viewportToolbar}
           ${(embedded ? settings.showNavigationCubeEmbedded : settings.showNavigationCubeStandalone) ? navigationCube : ''}
-          <div id="canvas"></div><div id="annotation-layer" aria-label="Štítky modelu"></div><div id="tag-draft-host"></div>
+          <div id="annotation-layer-back" class="annotation-layer annotation-layer-back" aria-label="Štítky za modelem"></div>
+          <div id="canvas"></div>
+          <div id="annotation-layer-front" class="annotation-layer annotation-layer-front" aria-label="Štítky před modelem"></div>
+          <div id="tag-draft-host"></div>
           ${embedGate}
         </section>
         <div id="sidebar-host"></div></div>
@@ -620,13 +644,14 @@ async function openModel(model, tagId, lod = 'original') {
   restoreTagDraft();
   viewerMarkup();
   const canvas = document.querySelector('#canvas');
-  const labelLayer = document.querySelector('#annotation-layer');
+  const frontLayer = document.querySelector('#annotation-layer-front');
+  const backLayer = document.querySelector('#annotation-layer-back');
   sceneManager = new SceneManager(canvas, (camera) => annotationManager?.update(camera));
   sceneManager.setNavigationMode(settings.navigationMode);
   sceneManager.setSceneCenterVisible(settings.showSceneCenter);
   applySceneBackground();
   initPanelResizing({ getSceneManager: () => sceneManager });
-  annotationManager = new AnnotationManager(sceneManager, labelLayer, {
+  annotationManager = new AnnotationManager(sceneManager, { front: frontLayer, back: backLayer }, {
     onSelect: (tag) => {
       selectedTag = tag;
       renderCurrentSidebar();
@@ -643,6 +668,13 @@ async function openModel(model, tagId, lod = 'original') {
         renderCurrentSidebar();
       }
     }
+  });
+  annotationManager.setBehindMode(settings.behindMode);
+  annotationManager.setLabelFrameStyle(settings.labelFrameStyle);
+  annotationManager.setAnchorDotSettings({
+    show: settings.showAnchorDot,
+    sizeMode: settings.anchorDotSizeMode,
+    scale: settings.anchorDotScale
   });
   annotationManager.setCanEdit(settings.canEdit);
   renderTagDraft();
@@ -779,10 +811,37 @@ function userSettingsContent() {
       <label class="navigation-cube-toggle"><input type="checkbox" data-user-setting="showNavigationCubeEmbedded" ${settings.showNavigationCubeEmbedded ? 'checked' : ''}> Zobrazit navigační kostku ve vloženém prohlížeči</label>
       <p class="setting-note">Původní režim otáčí kamerou. Stabilní otočení používá pevné osy X/Y; volný trackball dovolí i náklon kolem směru pohledu. Navigační kostka vpravo nahoře rychle nastaví šest základních směrů. Ve vloženém prohlížeči je ve výchozím nastavení skrytá.</p>
     </section>`;
+  const textAndTagSettings = `
+    <section class="annotation-settings"><h2>Nastavení textu a vodících čar</h2>
+      <label>Zobrazení nápisů za objektem<select data-user-setting="behindMode">
+        <option value="hide" ${settings.behindMode === 'hide' ? 'selected' : ''}>Skrýt nápisy za objektem (nejsou vidět)</option>
+        <option value="dim" ${settings.behindMode === 'dim' ? 'selected' : ''}>Ztlumit nápisy za objektem (poloprůhledné)</option>
+        <option value="all" ${settings.behindMode === 'all' ? 'selected' : ''}>Normální — všechny nápisy navrchu (jako dříve)</option>
+      </select></label>
+      <label>Rámeček textu<select data-user-setting="labelFrameStyle">
+        <option value="border" ${settings.labelFrameStyle === 'border' ? 'selected' : ''}>S rámečkem</option>
+        <option value="none" ${settings.labelFrameStyle === 'none' ? 'selected' : ''}>Bez rámečku</option>
+      </select></label>
+      <label class="setting-checkbox"><input type="checkbox" data-user-setting="showAnchorDot" ${settings.showAnchorDot ? 'checked' : ''}> Zobrazit tečku na modelu (ukotvení vodící čáry)</label>
+      <label>Chování velikosti tečky<select data-user-setting="anchorDotSizeMode">
+        <option value="dynamic" ${settings.anchorDotSizeMode === 'dynamic' ? 'selected' : ''}>Měnit podle přiblížení (dynamická — jako dosud)</option>
+        <option value="fixed" ${settings.anchorDotSizeMode === 'fixed' ? 'selected' : ''}>Pevná velikost poměrově k modelu</option>
+        <option value="none" ${settings.anchorDotSizeMode === 'none' ? 'selected' : ''}>Nezobrazovat tečku na modelu</option>
+      </select></label>
+      <label class="setting-range-wrap">
+        <span class="setting-range-header">
+          <span>Velikost tečky na modelu</span>
+          <output data-user-setting-output="anchorDotScale">${Math.round((settings.anchorDotScale ?? 1) * 100)} %</output>
+        </span>
+        <input type="range" data-user-setting="anchorDotScale" min="20" max="300" step="5" value="${Math.round((settings.anchorDotScale ?? 1) * 100)}">
+      </label>
+      <p class="setting-note">Nápisy za objektem lze skrýt, ztlumit nebo nechat všechny na vrchu jako dříve. Text lze zobrazit s ohraničujícím rámečkem nebo bez něj. U tečky na modelu lze nastavit její viditelnost, pevnou velikost poměrově k modelu nebo dynamické přizpůsobení přiblížení kamery.</p>
+    </section>`;
   return `
     <label>Rozhraní<select data-user-setting="interfaceMode"><option value="simple" ${settings.interfaceMode === 'simple' ? 'selected' : ''}>Jednoduché</option><option value="advanced" ${settings.interfaceMode === 'advanced' ? 'selected' : ''}>Pokročilé</option></select></label>
     <p class="setting-note">Jednoduché rozhraní je určené k prohlížení a studiu. Pokročilé zobrazí technické informace o modelu.</p>
     ${navigationSettings}
+    ${textAndTagSettings}
     ${loadingSettings}`;
 }
 
@@ -790,7 +849,12 @@ function bindUserSettings(host) {
   host.querySelectorAll('[data-user-setting]').forEach((input) => {
     const eventName = input.matches('select, input[type="checkbox"]') ? 'change' : 'input';
     input.addEventListener(eventName, () => {
-      updateUserSetting(input.dataset.userSetting, input.type === 'checkbox' ? input.checked : input.value);
+      const value = input.type === 'checkbox' ? input.checked : input.value;
+      updateUserSetting(input.dataset.userSetting, value);
+      if (input.type === 'range') {
+        const output = host.querySelector(`[data-user-setting-output="${input.dataset.userSetting}"]`);
+        if (output) output.textContent = `${Math.round(Number(input.value))} %`;
+      }
     });
   });
   host.querySelector('[data-user-action="prefer-original"]')?.addEventListener('click', () => {
@@ -814,6 +878,10 @@ function renderUserSettingsPage() {
         <header class="settings-page-heading"><p class="eyebrow">UŽIVATELSKÉ NASTAVENÍ</p><h1>Prohlížeč</h1><p>Nastavení platí pro toto zařízení a uloží se i pro další modely.</p></header>
         <section class="settings-page-form" aria-label="Uživatelské nastavení prohlížeče">${userSettingsContent()}</section>
         <div class="settings-page-actions"><button type="button" class="button button-primary" data-action="settings-back">${actionIconMarkup('back')}${model ? 'Zpět k modelu' : 'Zpět k modelům'}</button></div>
+        <footer class="about-footer">
+          <p>Autor: <a href="https://www.wikiskripta.eu/w/U%C5%BEivatel:KubiV" target="_blank" rel="noopener noreferrer">Jakub Vávra</a></p>
+          <p class="about-version">Verze: <a href="${escapeHtml(getGitHubReleasesUrl())}" target="_blank" rel="noopener noreferrer" title="Zobrazit vydání na GitHubu">${escapeHtml(APP_VERSION)}</a>${APP_GIT_COMMIT ? ` (<a href="${escapeHtml(getGitHubCommitUrl(APP_GIT_COMMIT))}" target="_blank" rel="noopener noreferrer" title="Zobrazit commit ${escapeHtml(APP_GIT_COMMIT)} na GitHubu">${escapeHtml(APP_GIT_COMMIT)}</a>)` : ''}</p>
+        </footer>
       </article></div>
     </main>`;
   bindUserSettings(app);
@@ -828,10 +896,48 @@ function renderUserSettingsPage() {
 function updateUserSetting(key, value) {
   if (key === 'loadStrategy' || key === 'interfaceMode' || key === 'navigationMode') settings[key] = value;
   else if (['showNavigationCubeStandalone', 'showNavigationCubeEmbedded'].includes(key)) settings[key] = Boolean(value);
+  else if (key === 'showAnchorDot') {
+    settings.showAnchorDot = Boolean(value);
+    if (!settings.showAnchorDot) {
+      settings.anchorDotSizeMode = 'none';
+    } else if (settings.anchorDotSizeMode === 'none') {
+      settings.anchorDotSizeMode = 'dynamic';
+    }
+  }
+  else if (key === 'behindMode') settings.behindMode = ['hide', 'dim', 'all'].includes(value) ? value : 'hide';
+  else if (key === 'labelFrameStyle') settings.labelFrameStyle = value === 'none' ? 'none' : 'border';
+  else if (key === 'anchorDotSizeMode') {
+    settings.anchorDotSizeMode = ['fixed', 'none', 'dynamic'].includes(value) ? value : 'dynamic';
+    settings.showAnchorDot = settings.anchorDotSizeMode !== 'none';
+  }
+  else if (key === 'anchorDotScale') settings.anchorDotScale = Math.max(0.2, Math.min(3.0, Number(value) / 100));
   else if (key === 'lod' || key === 'onDemandLod') settings[key] = normalizedLod(value);
   else if (key === 'wireframe') settings[key] = Boolean(value);
   else settings[key] = Number.isNaN(Number(value)) ? value : Number(value);
   saveDeviceSettings();
+
+  if (key === 'behindMode') {
+    annotationManager?.setBehindMode(settings.behindMode);
+    return;
+  }
+  if (key === 'labelFrameStyle') {
+    annotationManager?.setLabelFrameStyle(settings.labelFrameStyle);
+    return;
+  }
+  if (['showAnchorDot', 'anchorDotSizeMode', 'anchorDotScale'].includes(key)) {
+    annotationManager?.setAnchorDotSettings({
+      show: settings.showAnchorDot,
+      sizeMode: settings.anchorDotSizeMode,
+      scale: settings.anchorDotScale
+    });
+    if (document.querySelector('.user-settings-page')) {
+      const check = document.querySelector('[data-user-setting="showAnchorDot"]');
+      if (check && check.checked !== settings.showAnchorDot) check.checked = settings.showAnchorDot;
+      const select = document.querySelector('[data-user-setting="anchorDotSizeMode"]');
+      if (select && select.value !== settings.anchorDotSizeMode) select.value = settings.anchorDotSizeMode;
+    }
+    return;
+  }
   if (['loadStrategy', 'lod', 'onDemandLod'].includes(key)) {
     if (document.querySelector('.user-settings-page')) renderUserSettingsPage();
     else startModelLoading(currentModel, selectedTag?.id);
@@ -1124,6 +1230,11 @@ function renderCurrentSidebar() {
       if (key === 'showSceneCenter') {
         settings.showSceneCenter = Boolean(value);
         sceneManager?.setSceneCenterVisible(settings.showSceneCenter);
+        renderCurrentSidebar();
+        return;
+      }
+      if (['behindMode', 'labelFrameStyle', 'showAnchorDot', 'anchorDotSizeMode', 'anchorDotScale'].includes(key)) {
+        updateUserSetting(key, value);
         renderCurrentSidebar();
         return;
       }

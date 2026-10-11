@@ -1,4 +1,15 @@
 import { actionIconMarkup, brandMarkup, settingsIconMarkup, wikiSessionIndicatorMarkup } from './brand.js';
+import { APP_VERSION, APP_GIT_COMMIT, getGitHubCommitUrl, getGitHubReleasesUrl } from '../version.js';
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  })[character]);
+}
 
 export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = null, wikiSessionUserUrl = '', wikiSessionLoginUrl = '' }) {
   host.innerHTML = `
@@ -51,6 +62,7 @@ export function renderAboutPage(host, { onHome, onSettings, wikiSessionUser = nu
 
           <footer class="about-footer">
             <p>Autor: <a href="https://www.wikiskripta.eu/w/U%C5%BEivatel:KubiV" target="_blank" rel="noopener noreferrer">Jakub Vávra</a></p>
+            <p class="about-version">Verze: <a href="${escapeHtml(getGitHubReleasesUrl())}" target="_blank" rel="noopener noreferrer" title="Zobrazit vydání na GitHubu">${escapeHtml(APP_VERSION)}</a>${APP_GIT_COMMIT ? ` (<a href="${escapeHtml(getGitHubCommitUrl(APP_GIT_COMMIT))}" target="_blank" rel="noopener noreferrer" title="Zobrazit commit ${escapeHtml(APP_GIT_COMMIT)} na GitHubu">${escapeHtml(APP_GIT_COMMIT)}</a>)` : ''}</p>
           </footer>
         </article>
       </div>

@@ -15,3 +15,5 @@ Pokud článek potřebuje pouze odkaz do samostatného prohlížeče, použijte 
 Podrobný popis všech parametrů najdete na podstránkách [[Template:3D prohlížeč/dokumentace|Šablona:3D prohlížeč/dokumentace]] a [[Template:3D odkaz/dokumentace|Šablona:3D odkaz/dokumentace]].
 
 ''Autor: [https://www.wikiskripta.eu/w/U%C5%BEivatel:KubiV Jakub Vávra]''
+
+''Verze: 2.0.0''

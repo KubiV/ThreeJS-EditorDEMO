@@ -20,7 +20,7 @@ export class SceneManager {
     this.container = container;
     this.onRender = onRender;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#f7fafc');
+    this.scene.background = null;
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.01, 10000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -168,8 +168,12 @@ export class SceneManager {
   }
 
   setBackground(color = '#f7fafc') {
-    this.scene.background.set(color);
     this.container.style.background = color;
+    const viewport = this.container.closest('.wiki-viewport') || this.container.parentElement;
+    if (viewport) {
+      viewport.style.background = color;
+      viewport.style.setProperty('--scene-background', color);
+    }
   }
 
   clearModel() {

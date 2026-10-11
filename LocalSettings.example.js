@@ -57,16 +57,24 @@ export default {
       // pouze s režimem 'login-required'.
       allowedGroups: []
     },
-    // Řízení správy nahraných modelů podle přesných jmen účtů MediaWiki.
+    // Řízení správy nahraných modelů podle jmen účtů nebo uživatelských skupin MediaWiki.
     // Výchozí false zachovává chování starších instalací: každý přihlášený
     // editor MediaWiki může upravovat modely. Po doplnění vlastníků u starých
-    // záznamů lze nastavit true a omezit úpravy na vlastníka + editors.
+    // záznamů lze nastavit true a omezit úpravy na vlastníka + editors / editorGroups.
     // Mazání a nově vykreslení náhledu jsou samostatná, silnější oprávnění.
+    // Kromě konkrétních účtů lze uvést i uživatelské skupiny (např. 'bureaucrat',
+    // 'sysop', 'administrátor', 'administrátoři', případně s předponou 'group:bureaucrat').
+    // Pozor: na WikiSkriptech jsou nejvyšší běžnou rolí administrátoři ("administrátor" / "sysop").
     modelManagement: {
       requireOwnershipForEdits: false,
+      // Společné skupiny pro všechny správní operace (volitelné):
+      // groups: ['administrátor', 'bureaucrat'],
       editors: [],
+      editorGroups: [],
       deleters: [],
-      thumbnailRegenerators: []
+      deleterGroups: [],
+      thumbnailRegenerators: [],
+      thumbnailRegeneratorGroups: []
     }
   },
 

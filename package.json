@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Interaktivní 3D prohlížeč a editor modelů pro MediaWiki",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KubiV/ThreeJS-EditorDEMO.git"
+  },
   "scripts": {
     "dev": "node server.js --dev",
     "wiki": "php -S localhost:8000 -t mediawiki-1.41.1 mediawiki-1.41.1/maintenance/dev/includes/router.php",
@@ -11,7 +15,10 @@
     "build": "npm run generate:icons && vite build",
     "preview": "vite preview",
     "generate:icons": "node scripts/generate-favicons.mjs",
-    "build:anatomy": "node scripts/build-anatomy-data.mjs"
+    "build:anatomy": "node scripts/build-anatomy-data.mjs",
+    "release:patch": "npm version patch && git push && git push --tags",
+    "release:minor": "npm version minor && git push && git push --tags",
+    "release:major": "npm version major && git push && git push --tags"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",
